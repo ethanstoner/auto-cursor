@@ -984,12 +984,21 @@ async function loadAgentTerminals() {
                                    agent.status === 'failed' ? 'error' : 'waiting';
                 const statusText = agent.status_text || agent.status;
                 
-                // Only update if changed
-                const currentText = statusEl.textContent.trim();
-                if (currentText !== statusText) {
+                // Only update if changed (preserve toggle icon)
+                const toggleIcon = statusEl.querySelector('.terminal-toggle-icon');
+                const currentText = statusEl.textContent.trim().replace('Toggle', '').trim();
+                if (currentText !== statusText || !toggleIcon) {
+                    const statusLabels = {
+                        'running': 'Running',
+                        'completed': 'Completed',
+                        'failed': 'Failed',
+                        'pending': 'Pending',
+                        'qa_running': 'QA Running'
+                    };
                     statusEl.innerHTML = `
                         <span class="status-dot ${statusClass}"></span>
-                        <span>${escapeHtml(statusText)}</span>
+                        <span>${escapeHtml(statusLabels[agent.status] || statusText)}</span>
+                        <img src="https://unpkg.com/lucide-static@latest/icons/chevron-down.svg" alt="Toggle" class="terminal-toggle-icon" id="toggle-icon-${escapeHtml(agent.id)}">
                     `;
                 }
             }
