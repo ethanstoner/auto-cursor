@@ -1875,14 +1875,16 @@ async function refreshStats() {
         }
         
         // Cache stats
-        dataCache.stats = { projects: projects.length, agents: agents.length, running, completed };
+        const projectsCount = projects ? projects.length : 0;
+        const agentsCount = agents ? agents.length : 0;
+        dataCache.stats = { projects: projectsCount, agents: agentsCount, running, completed };
         dataCache.lastFetch.stats = Date.now();
         
-        console.log(`✅ Loaded ${projects.length} projects, ${agents.length} agents for current project`);
-        console.log(`Stats: ${projects.length} projects, ${agents.length} agents, ${running} running, ${completed} completed`);
+        console.log(`✅ Loaded ${projectsCount} projects, ${agentsCount} agents for current project`);
+        console.log(`Stats: ${projectsCount} projects, ${agentsCount} agents, ${running} running, ${completed} completed`);
         
-        // Update stats (smooth transition, no flash)
-        updateStats(projects.length, agents.length, running, completed);
+        // Update stats (smooth transition, no flash) - ALWAYS update
+        updateStats(projectsCount, agentsCount, running, completed);
     } catch (error) {
         console.error('❌ Error refreshing stats:', error);
         console.error('Error details:', error.stack);
