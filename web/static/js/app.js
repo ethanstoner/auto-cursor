@@ -1789,57 +1789,45 @@ function updateStats(projects, agents, running, completed) {
     const completedEl = document.getElementById('stat-completed');
     
     // Update with smooth transitions (no innerHTML, just textContent)
+    // ALWAYS update, even if value is 0
     if (projectsEl) {
-        const oldValue = projectsEl.textContent;
-        const newValue = projects !== null && projects !== undefined ? String(projects) : '-';
-        if (oldValue !== newValue) {
-            // Smooth number transition
-            projectsEl.style.transform = 'scale(1.1)';
-            projectsEl.textContent = newValue;
-            setTimeout(() => {
-                projectsEl.style.transform = 'scale(1)';
-                projectsEl.style.transition = 'transform 0.2s ease';
-            }, 50);
-        }
+        const newValue = projects !== null && projects !== undefined ? String(projects) : '0';
+        projectsEl.style.transform = 'scale(1.1)';
+        projectsEl.textContent = newValue;
+        setTimeout(() => {
+            projectsEl.style.transform = 'scale(1)';
+            projectsEl.style.transition = 'transform 0.2s ease';
+        }, 50);
     }
     
     if (agentsEl) {
-        const oldValue = agentsEl.textContent;
-        const newValue = agents !== null && agents !== undefined ? String(agents) : '-';
-        if (oldValue !== newValue) {
-            agentsEl.style.transform = 'scale(1.1)';
-            agentsEl.textContent = newValue;
-            setTimeout(() => {
-                agentsEl.style.transform = 'scale(1)';
-                agentsEl.style.transition = 'transform 0.2s ease';
-            }, 50);
-        }
+        const newValue = agents !== null && agents !== undefined ? String(agents) : '0';
+        agentsEl.style.transform = 'scale(1.1)';
+        agentsEl.textContent = newValue;
+        setTimeout(() => {
+            agentsEl.style.transform = 'scale(1)';
+            agentsEl.style.transition = 'transform 0.2s ease';
+        }, 50);
     }
     
     if (runningEl) {
-        const oldValue = runningEl.textContent;
-        const newValue = running !== null && running !== undefined ? String(running) : '-';
-        if (oldValue !== newValue) {
-            runningEl.style.transform = 'scale(1.1)';
-            runningEl.textContent = newValue;
-            setTimeout(() => {
-                runningEl.style.transform = 'scale(1)';
-                runningEl.style.transition = 'transform 0.2s ease';
-            }, 50);
-        }
+        const newValue = running !== null && running !== undefined ? String(running) : '0';
+        runningEl.style.transform = 'scale(1.1)';
+        runningEl.textContent = newValue;
+        setTimeout(() => {
+            runningEl.style.transform = 'scale(1)';
+            runningEl.style.transition = 'transform 0.2s ease';
+        }, 50);
     }
     
     if (completedEl) {
-        const oldValue = completedEl.textContent;
-        const newValue = completed !== null && completed !== undefined ? String(completed) : '-';
-        if (oldValue !== newValue) {
-            completedEl.style.transform = 'scale(1.1)';
-            completedEl.textContent = newValue;
-            setTimeout(() => {
-                completedEl.style.transform = 'scale(1)';
-                completedEl.style.transition = 'transform 0.2s ease';
-            }, 50);
-        }
+        const newValue = completed !== null && completed !== undefined ? String(completed) : '0';
+        completedEl.style.transform = 'scale(1.1)';
+        completedEl.textContent = newValue;
+        setTimeout(() => {
+            completedEl.style.transform = 'scale(1)';
+            completedEl.style.transition = 'transform 0.2s ease';
+        }, 50);
     }
 }
 
