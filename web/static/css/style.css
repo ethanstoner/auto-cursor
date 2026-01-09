@@ -454,6 +454,29 @@ h3 {
   cursor: pointer;
 }
 
+.search-input {
+  padding: 10px 16px;
+  border: 1px solid var(--border-dark);
+  background: var(--bg-primary);
+  color: var(--text-primary-light);
+  font-size: 14px;
+  font-family: var(--font-sans);
+  border-radius: 0;
+  min-width: 250px;
+  transition: all 0.2s ease;
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: rgba(255, 255, 255, 0.3);
+  background: var(--bg-secondary);
+}
+
+.search-input::placeholder {
+  color: var(--text-secondary-light);
+  opacity: 0.6;
+}
+
 /* Kanban Board */
 .kanban-board {
   display: grid;
@@ -980,6 +1003,7 @@ h3 {
   overflow: hidden;
   animation: slideIn 0.3s ease;
   transition: all 0.3s ease;
+  position: relative;
 }
 
 .agent-terminal:hover {
@@ -996,6 +1020,7 @@ h3 {
   align-items: center;
   flex-wrap: wrap;
   gap: var(--spacing-sm);
+  position: relative;
 }
 
 .agent-terminal-title {
@@ -1149,16 +1174,20 @@ h3 {
 }
 
 /* Live indicator for streaming */
-.agent-terminal[data-status="running"]::after {
-  content: '';
+.agent-terminal[data-status="running"] .agent-terminal-header::after {
+  content: 'LIVE';
   position: absolute;
-  top: 10px;
-  right: 10px;
-  width: 8px;
-  height: 8px;
-  background: rgba(52, 199, 89, 1);
-  border-radius: 50%;
+  top: 8px;
+  right: 8px;
+  font-size: 9px;
+  font-weight: 600;
+  color: rgba(52, 199, 89, 1);
+  font-family: var(--font-mono);
+  padding: 2px 6px;
+  background: rgba(52, 199, 89, 0.1);
+  border: 1px solid rgba(52, 199, 89, 0.3);
   animation: pulse 2s infinite;
+  letter-spacing: 0.5px;
 }
 
 @keyframes pulse {

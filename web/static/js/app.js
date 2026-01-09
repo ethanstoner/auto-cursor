@@ -824,8 +824,20 @@ async function loadAgentTerminals() {
         const currentAgentIds = Array.from(container.querySelectorAll('.agent-terminal')).map(el => el.dataset.agentId);
         const newAgentIds = agents.map(a => a.id);
         
+        // Apply filters
+        let filteredAgents = agents;
+        if (agentSearchFilter) {
+            filteredAgents = filteredAgents.filter(agent => 
+                agent.id.toLowerCase().includes(agentSearchFilter.toLowerCase()) ||
+                (agent.last_update && agent.last_update.toLowerCase().includes(agentSearchFilter.toLowerCase()))
+            );
+        }
+        if (agentStatusFilter !== 'all') {
+            filteredAgents = filteredAgents.filter(agent => agent.status === agentStatusFilter);
+        }
+        
         // Update existing terminals or add new ones (incremental updates)
-        agents.forEach(agent => {
+        filteredAgents.forEach(agent => {
             let terminalEl = container.querySelector(`[data-agent-id="${agent.id}"]`);
             if (!terminalEl) {
                 // Add new terminal (with fade-in)
@@ -865,9 +877,10 @@ async function loadAgentTerminals() {
             }
         });
         
-        // Remove terminals for agents that are no longer running (with fade-out)
+        // Remove terminals for agents that are no longer running or filtered out (with fade-out)
+        const filteredAgentIds = filteredAgents.map(a => a.id);
         currentAgentIds.forEach(agentId => {
-            if (!newAgentIds.includes(agentId)) {
+            if (!filteredAgentIds.includes(agentId)) {
                 const terminalEl = container.querySelector(`[data-agent-id="${agentId}"]`);
                 if (terminalEl) {
                     terminalEl.style.opacity = '0';
@@ -2016,6 +2029,17 @@ document.getElementById('refresh-kanban-btn')?.addEventListener('click', () => {
 });
 
 document.getElementById('refresh-agents-btn')?.addEventListener('click', () => {
+    loadAgentTerminals();
+});
+
+// Agent search and filter
+document.getElementById('agent-search-input')?.addEventListener('input', (e) => {
+    agentSearchFilter = e.target.value;
+    loadAgentTerminals();
+});
+
+document.getElementById('agent-filter-status')?.addEventListener('change', (e) => {
+    agentStatusFilter = e.target.value;
     loadAgentTerminals();
 });
 
