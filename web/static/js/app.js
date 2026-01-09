@@ -1,6 +1,12 @@
 // Auto-Cursor Web Interface - Complete Overhaul
 const API_BASE = '/api';
 
+// Global function to manually trigger project load (for debugging)
+window.forceLoadProjects = function() {
+    console.log('🔧 Manual project load triggered');
+    loadProjectsForSidebar();
+};
+
 // State Management
 let currentProjectId = null;
 let currentView = 'kanban';
@@ -73,11 +79,23 @@ if (document.readyState === 'loading') {
 // Also ensure projects load after a short delay as final fallback
 setTimeout(() => {
     const select = document.getElementById('sidebar-project-select');
-    if (select && (select.options.length <= 1 || select.options[0].value === '')) {
+    console.log('🔄 Final fallback check (3s)...');
+    console.log('Select element:', select ? 'found' : 'NOT FOUND');
+    if (select) {
+        console.log(`Current options: ${select.options.length}`);
+        Array.from(select.options).forEach((opt, idx) => {
+            console.log(`  [${idx}] "${opt.value}" = "${opt.textContent}"`);
+        });
+    }
+    if (select && (select.options.length <= 1 || (select.options.length === 1 && select.options[0].value === ''))) {
         console.log('🔄 Final fallback: Ensuring projects are loaded...');
         if (typeof loadProjectsForSidebar === 'function') {
             loadProjectsForSidebar().catch(err => console.error('Final fallback error:', err));
+        } else {
+            console.error('❌ loadProjectsForSidebar function not found!');
         }
+    } else if (select && select.options.length > 1) {
+        console.log('✅ Projects already loaded in fallback check');
     }
 }, 3000);
 
@@ -1739,7 +1757,24 @@ async function loadProjectsForSidebar() {
         }
         
         console.log('✅ Found select element, populating...');
+        console.log('Select element details:', {
+            id: select.id,
+            className: select.className,
+            optionsLength: select.options.length,
+            parentElement: select.parentElement?.tagName
+        });
         populateProjectSelect(select, projects);
+        
+        // Verify it worked
+        setTimeout(() => {
+            const verifySelect = document.getElementById('sidebar-project-select');
+            if (verifySelect) {
+                console.log(`✅ Verification: Select now has ${verifySelect.options.length} options`);
+                Array.from(verifySelect.options).forEach((opt, idx) => {
+                    console.log(`   Option ${idx}: value="${opt.value}", text="${opt.textContent}"`);
+                });
+            }
+        }, 100);
         
     } catch (error) {
         console.error('❌ Error loading projects:', error);
@@ -1766,10 +1801,20 @@ function populateProjectSelect(select, projects) {
     }
     
     console.log(`📋 populateProjectSelect called with ${projects ? projects.length : 0} projects`);
-    console.log('Projects data:', projects);
+    console.log('Projects data:', JSON.stringify(projects, null, 2));
+    console.log('Select element:', select);
+    console.log('Select parent:', select.parentElement);
     
-    // Clear existing options
-    select.innerHTML = '<option value="">Select project...</option>';
+    // Clear existing options - use removeChild for better compatibility
+    while (select.firstChild) {
+        select.removeChild(select.firstChild);
+    }
+    
+    // Add default option
+    const defaultOption = document.createElement('option');
+    defaultOption.value = '';
+    defaultOption.textContent = 'Select project...';
+    select.appendChild(defaultOption);
     
     // Add projects
     if (projects && Array.isArray(projects) && projects.length > 0) {
@@ -1780,15 +1825,19 @@ function populateProjectSelect(select, projects) {
             option.value = projectId;
             option.textContent = projectName;
             select.appendChild(option);
-            console.log(`   ✅ Added option: ${projectId} = ${projectName}`);
+            console.log(`   ✅ Added option ${index + 1}: value="${projectId}", text="${projectName}"`);
         });
         
         console.log(`✅ Populated ${projects.length} projects in selector`);
+        console.log(`Select now has ${select.options.length} total options`);
         
-        // Force a visual update
+        // Force a visual update with multiple methods
         select.style.display = 'none';
-        select.offsetHeight; // Trigger reflow
+        void select.offsetHeight; // Trigger reflow
         select.style.display = '';
+        
+        // Also trigger change event to ensure UI updates
+        select.dispatchEvent(new Event('change', { bubbles: true }));
         
         // Set current project if available
         if (currentProjectId) {
@@ -1796,8 +1845,9 @@ function populateProjectSelect(select, projects) {
             console.log(`   Set current project to: ${currentProjectId}`);
         } else if (projects.length === 1) {
             // Auto-select if only one project
-            select.value = projects[0].id || projects[0].name;
-            currentProjectId = select.value;
+            const singleProjectId = projects[0].id || projects[0].name;
+            select.value = singleProjectId;
+            currentProjectId = singleProjectId;
             console.log(`   Auto-selected single project: ${currentProjectId}`);
             // Load view data for auto-selected project
             setTimeout(() => {
@@ -1805,8 +1855,12 @@ function populateProjectSelect(select, projects) {
             }, 100);
         }
         
-        console.log(`✅ Successfully loaded ${projects.length} projects into selector`);
-        console.log(`Select element now has ${select.options.length} options`);
+        // Final verification
+        console.log(`✅ Final check: Select has ${select.options.length} options`);
+        console.log(`   Selected value: "${select.value}"`);
+        Array.from(select.options).forEach((opt, idx) => {
+            console.log(`   [${idx}] "${opt.value}" = "${opt.textContent}"`);
+        });
     } else {
         // No projects found
         const option = document.createElement('option');
@@ -1816,6 +1870,8 @@ function populateProjectSelect(select, projects) {
         select.appendChild(option);
         console.warn('⚠️ No projects found in API response (empty array or null)');
         console.warn('Projects value:', projects);
+        console.warn('Projects type:', typeof projects);
+        console.warn('Is array?', Array.isArray(projects));
     }
 }
 
