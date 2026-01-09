@@ -1378,12 +1378,37 @@ async function refreshStats() {
         }
         
         const projects = await projectsRes.json();
-        const agents = await agentsRes.json();
-        console.log(`✅ Loaded ${projects.length} projects, ${agents.length} agents`);
         
-        const running = agents.filter(a => a.status === 'running').length;
-        const completed = agents.filter(a => a.status === 'completed').length;
+        // Get agents for CURRENT project only (not all agents)
+        let agents = [];
+        let running = 0;
+        let completed = 0;
         
+        if (currentProjectId) {
+            const agentsRes = await fetch(`${API_BASE}/projects/${currentProjectId}/agents`);
+            if (agentsRes.ok) {
+                agents = await agentsRes.json();
+            }
+            
+            // Get status to count running/completed correctly
+            const statusRes = await fetch(`${API_BASE}/projects/${currentProjectId}/status`);
+            if (statusRes.ok) {
+                const status = await statusRes.json();
+                const tasks = status.tasks || [];
+                running = tasks.filter(t => t.status === 'running').length;
+                completed = tasks.filter(t => t.status === 'completed').length;
+            }
+        } else {
+            // No project selected - use all agents (legacy behavior)
+            const agentsRes = await fetch(`${API_BASE}/agents`);
+            if (agentsRes.ok) {
+                agents = await agentsRes.json();
+                running = agents.filter(a => a.status === 'running').length;
+                completed = agents.filter(a => a.status === 'completed').length;
+            }
+        }
+        
+        console.log(`✅ Loaded ${projects.length} projects, ${agents.length} agents for current project`);
         console.log(`Stats: ${projects.length} projects, ${agents.length} agents, ${running} running, ${completed} completed`);
         updateStats(projects.length, agents.length, running, completed);
     } catch (error) {
