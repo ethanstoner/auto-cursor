@@ -1208,6 +1208,7 @@ function initializeModals() {
 
 // Project Management
 async function loadProjectsForSidebar() {
+    console.log('📋 Loading projects for sidebar...');
     try {
         console.log('📋 Loading projects from API...');
         console.log(`API_BASE: ${API_BASE}`);
@@ -1268,6 +1269,11 @@ async function loadProjectsForSidebar() {
 }
 
 function populateProjectSelect(select, projects) {
+    if (!select) {
+        console.error('❌ Select element is null in populateProjectSelect');
+        return;
+    }
+    
     // Clear existing options
     select.innerHTML = '<option value="">Select project...</option>';
     
@@ -1280,13 +1286,22 @@ function populateProjectSelect(select, projects) {
             option.value = projectId;
             option.textContent = projectName;
             select.appendChild(option);
-            console.log(`   Added option: ${projectId} = ${projectName}`);
+            console.log(`   ✅ Added option: ${projectId} = ${projectName}`);
         });
+        
+        console.log(`✅ Populated ${projects.length} projects in selector`);
         
         // Set current project if available
         if (currentProjectId) {
             select.value = currentProjectId;
             console.log(`   Set current project to: ${currentProjectId}`);
+        } else if (projects.length === 1) {
+            // Auto-select if only one project
+            select.value = projects[0].id || projects[0].name;
+            currentProjectId = select.value;
+            console.log(`   Auto-selected single project: ${currentProjectId}`);
+            // Load view data for auto-selected project
+            loadViewData(currentView);
         }
         
         console.log(`✅ Successfully loaded ${projects.length} projects into selector`);
@@ -1350,62 +1365,32 @@ async function refreshStats() {
         }
         const projects = await projectsRes.json();
         
-        // Get agents for CURRENT project only (not all agents)
+        // Get agents - use all agents for stats (but filter by project for display)
         let agents = [];
         let running = 0;
         let completed = 0;
         
-        if (currentProjectId) {
-            const agentsRes = await fetch(`${API_BASE}/projects/${currentProjectId}/agents`);
-            if (agentsRes.ok) {
-                agents = await agentsRes.json();
-            }
-            
-            // Get status to count running/completed correctly
-            const statusRes = await fetch(`${API_BASE}/projects/${currentProjectId}/status`);
-            if (statusRes.ok) {
-                const status = await statusRes.json();
-                const tasks = status.tasks || [];
-                running = tasks.filter(t => t.status === 'running').length;
-                completed = tasks.filter(t => t.status === 'completed').length;
-            }
-        } else {
-            // No project selected - use all agents (legacy behavior)
-            const agentsRes = await fetch(`${API_BASE}/agents`);
-            if (agentsRes.ok) {
-                agents = await agentsRes.json();
-            }
+        // Always get all agents for stats display
+        const agentsRes = await fetch(`${API_BASE}/agents`, {cache: 'no-cache'});
+        if (agentsRes.ok) {
+            agents = await agentsRes.json();
         }
         
-        const projects = await projectsRes.json();
-        
-        // Get agents for CURRENT project only (not all agents)
-        let agents = [];
-        let running = 0;
-        let completed = 0;
-        
+        // If project selected, get project-specific counts
         if (currentProjectId) {
-            const agentsRes = await fetch(`${API_BASE}/projects/${currentProjectId}/agents`);
-            if (agentsRes.ok) {
-                agents = await agentsRes.json();
-            }
-            
-            // Get status to count running/completed correctly
-            const statusRes = await fetch(`${API_BASE}/projects/${currentProjectId}/status`);
+            const statusRes = await fetch(`${API_BASE}/projects/${currentProjectId}/status`, {cache: 'no-cache'});
             if (statusRes.ok) {
                 const status = await statusRes.json();
                 const tasks = status.tasks || [];
                 running = tasks.filter(t => t.status === 'running').length;
                 completed = tasks.filter(t => t.status === 'completed').length;
+                // Use task count for agents count when project is selected
+                agents = tasks; // Show tasks as "agents" for current project
             }
         } else {
-            // No project selected - use all agents (legacy behavior)
-            const agentsRes = await fetch(`${API_BASE}/agents`);
-            if (agentsRes.ok) {
-                agents = await agentsRes.json();
-                running = agents.filter(a => a.status === 'running').length;
-                completed = agents.filter(a => a.status === 'completed').length;
-            }
+            // No project selected - use all agents
+            running = agents.filter(a => a.status === 'running').length;
+            completed = agents.filter(a => a.status === 'completed').length;
         }
         
         console.log(`✅ Loaded ${projects.length} projects, ${agents.length} agents for current project`);
