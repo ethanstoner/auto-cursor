@@ -774,6 +774,8 @@ async function updateTaskStatus(taskId, newColumn) {
 // Agent Terminals - with smooth updates
 let agentLogIntervals = {};
 let agentLogStreams = {}; // Track SSE connections
+let agentSearchFilter = '';
+let agentStatusFilter = 'all';
 
 async function loadAgentTerminals() {
     // Stale-while-revalidate: keep old agents visible
