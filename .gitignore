@@ -1,0 +1,19 @@
+# Auto-Cursor
+.auto-cursor/
+*.log
+*.pid
+
+# Temporary files
+*.tmp
+*.temp
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
