@@ -142,6 +142,39 @@ check_dependencies() {
             continue
         fi
         
+        # Check if dependency task is actually completed by checking tasks.json
+        # This handles cases where agent status doesn't match task completion
+        local project_id=$(basename "$(dirname "$(dirname "$task_file")")")
+        local tasks_file="${HOME}/.auto-cursor/projects/${project_id}/tasks.json"
+        if [ -f "$tasks_file" ]; then
+            local task_status=$(jq -r ".[] | select(.id == \"$dep\") | .status" "$tasks_file" 2>/dev/null || echo "")
+            if [ "$task_status" = "completed" ]; then
+                # Task is completed in tasks.json - allow to proceed
+                # Check QA severity if QA failed
+                local qa_status=$(jq -r ".[] | select(.id == \"$dep\") | .qa_status" "$tasks_file" 2>/dev/null || echo "")
+                if [ "$qa_status" = "failed" ]; then
+                    # Check if failure is critical
+                    local qa_log_file="${QA_DIR}/${dep}.log"
+                    if [ -f "$qa_log_file" ]; then
+                        # Check for critical failure indicators
+                        if grep -qiE "(test failed|build failed|error:|exception|traceback|fatal)" "$qa_log_file" 2>/dev/null; then
+                            # Critical failure - block this task
+                            return 1
+                        else
+                            # Non-critical failure (docs, formatting, etc.) - allow task to proceed
+                            continue
+                        fi
+                    else
+                        # No QA log - assume non-critical and allow (since task completed)
+                        continue
+                    fi
+                else
+                    # QA passed or not run - allow
+                    continue
+                fi
+            fi
+        fi
+        
         # If dependency failed, check if it's a critical failure
         if [ "$dep_status" = "qa_failed" ] || [ "$dep_status" = "failed" ]; then
             # Check QA log to determine if failure is critical
