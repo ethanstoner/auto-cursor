@@ -123,6 +123,7 @@ set_agent_status() {
 }
 
 # Check if agent dependencies are met
+# Enhanced to allow non-critical dependency failures
 check_dependencies() {
     local agent_id="$1"
     local task_file="$2"
@@ -135,12 +136,36 @@ check_dependencies() {
     
     for dep in $deps; do
         local dep_status=$(get_agent_status "$dep")
-        if [ "$dep_status" != "qa_passed" ] && [ "$dep_status" != "completed" ]; then
-            return 1  # Dependency not met
+        
+        # If dependency is completed or passed QA, it's met
+        if [ "$dep_status" = "qa_passed" ] || [ "$dep_status" = "completed" ]; then
+            continue
+        fi
+        
+        # If dependency failed, check if it's a critical failure
+        if [ "$dep_status" = "qa_failed" ] || [ "$dep_status" = "failed" ]; then
+            # Check QA log to determine if failure is critical
+            local qa_log_file="${QA_DIR}/${dep}.log"
+            if [ -f "$qa_log_file" ]; then
+                # Check for critical failure indicators
+                if grep -qiE "(test failed|build failed|error:|exception|traceback|fatal)" "$qa_log_file" 2>/dev/null; then
+                    # Critical failure - block this task
+                    return 1
+                else
+                    # Non-critical failure (docs, formatting, etc.) - allow task to proceed
+                    continue
+                fi
+            else
+                # No QA log - assume critical and block
+                return 1
+            fi
+        else
+            # Dependency not completed yet - block
+            return 1
         fi
     done
     
-    return 0  # All dependencies met
+    return 0  # All dependencies met (or non-critical failures)
 }
 
 # Run QA on agent's work
