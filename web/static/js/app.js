@@ -1192,7 +1192,8 @@ function renderAgentTerminal(agent) {
         'running': 'https://unpkg.com/lucide-static@latest/icons/play-circle.svg',
         'completed': 'https://unpkg.com/lucide-static@latest/icons/check-circle.svg',
         'failed': 'https://unpkg.com/lucide-static@latest/icons/x-circle.svg',
-        'pending': 'https://unpkg.com/lucide-static@latest/icons/clock.svg'
+        'pending': 'https://unpkg.com/lucide-static@latest/icons/clock.svg',
+        'qa_running': 'https://unpkg.com/lucide-static@latest/icons/loader.svg'
     };
     
     const statusLabels = {
@@ -1203,15 +1204,22 @@ function renderAgentTerminal(agent) {
         'qa_running': 'QA Running'
     };
     
+    const statusColors = {
+        'running': 'rgba(255, 193, 7, 1)',
+        'completed': 'rgba(52, 199, 89, 1)',
+        'failed': 'rgba(255, 59, 48, 1)',
+        'pending': 'rgba(142, 142, 147, 1)',
+        'qa_running': 'rgba(88, 86, 214, 1)'
+    };
+    
     return `
         <div class="agent-terminal" data-agent-id="${escapeHtml(agent.id)}" data-status="${escapeHtml(agent.status)}">
             <div class="agent-terminal-header">
                 <div class="agent-terminal-title">
                     <h3>
-                        <img src="${statusIcons[agent.status] || statusIcons.pending}" alt="${agent.status}" class="status-icon-small" style="width: 14px; height: 14px; margin-right: 6px; vertical-align: middle;">
-                        ${escapeHtml(displayId)}
+                        <img src="${statusIcons[agent.status] || statusIcons.pending}" alt="${agent.status}" class="status-icon-small">
+                        <span>${escapeHtml(displayId)}</span>
                     </h3>
-                    ${agent.last_update ? `<div class="agent-last-update">${escapeHtml(agent.last_update.substring(0, 100))}</div>` : ''}
                 </div>
                 <div class="agent-status">
                     <span class="status-dot ${statusClass}"></span>
