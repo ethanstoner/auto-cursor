@@ -506,11 +506,18 @@ start_from_config() {
     echo -e "${GREEN}Starting $agent_count agents from $task_file${NC}"
     echo ""
     
-    # Initialize all agent states
+    # Initialize all agent states (but don't overwrite completed statuses)
     for i in $(seq 0 $((agent_count - 1))); do
         local agent_id=$(jq -r ".agents[$i].id" "$task_file")
-        set_agent_status "$agent_id" "pending"
-        echo "{}" > "${STATE_DIR}/${agent_id}.json"
+        local current_status=$(get_agent_status "$agent_id")
+        # Only set to pending if not already completed/qa_passed/qa_failed
+        if [ "$current_status" != "completed" ] && [ "$current_status" != "qa_passed" ] && [ "$current_status" != "qa_failed" ]; then
+            set_agent_status "$agent_id" "pending"
+        fi
+        # Only initialize JSON if it doesn't exist
+        if [ ! -f "${STATE_DIR}/${agent_id}.json" ]; then
+            echo "{}" > "${STATE_DIR}/${agent_id}.json"
+        fi
     done
     
     # Start agents (may need multiple passes for dependencies)
