@@ -1,6 +1,6 @@
 <div align="center">
 
-![Auto-Cursor Logo](logo.png)
+<img src="logo.png" alt="Auto-Cursor Logo" width="150" height="150">
 
 # Auto-Cursor
 
@@ -8,9 +8,32 @@
 
 *Plan, build, and validate software with AI agents working in parallel*
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![GitHub stars](https://img.shields.io/github/stars/ethanstoner/auto-cursor?style=social)](https://github.com/ethanstoner/auto-cursor)
+
 [Features](#-key-features) • [Quick Start](#-quick-start) • [Documentation](#-documentation) • [Examples](#-examples)
 
 </div>
+
+---
+
+## 📑 Table of Contents
+
+- [What is Auto-Cursor?](#-what-is-auto-cursor)
+  - [Key Features](#-key-features)
+- [Requirements](#-requirements)
+- [Quick Start](#-quick-start)
+- [Documentation](#-documentation)
+  - [Commands](#commands)
+- [Examples](#-examples)
+- [How It Works](#-how-it-works)
+- [Architecture](#-architecture)
+- [Comparison with Auto-Claude](#-comparison-with-auto-claude)
+- [Project Types Supported](#-project-types-supported)
+- [Workflow](#-workflow)
+- [Safety Features](#-safety-features)
+- [Contributing](#-contributing)
+- [License](#-license)
 
 ---
 
@@ -427,7 +450,11 @@ MIT License - see [LICENSE](LICENSE) file for details
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+
+- 🐛 [Report a Bug](https://github.com/ethanstoner/auto-cursor/issues/new?template=bug_report.md)
+- 💡 [Request a Feature](https://github.com/ethanstoner/auto-cursor/issues/new?template=feature_request.md)
+- 📝 [Submit a Pull Request](https://github.com/ethanstoner/auto-cursor/compare)
 
 ---
 
