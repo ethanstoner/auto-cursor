@@ -61,6 +61,8 @@ Commands:
   memory <project-id>          View memory/insights
   list                         List all projects
   clean <project-id>           Clean up worktrees and agents (only project agents)
+  web                          Start web interface on localhost (default port 8765)
+  serve                        Alias for 'web' command
 
 Examples:
   # Initialize a project
@@ -908,6 +910,68 @@ show_memory() {
     else
         echo "No memory/insights stored yet"
     fi
+}
+
+# Start web interface
+start_web_interface() {
+    local port="${1:-8765}"
+    
+    # Find web server script
+    local script_dir=""
+    if [ -f "${BASH_SOURCE[0]}" ]; then
+        script_dir=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+    else
+        script_dir="$(cd "$(dirname "$0")" && pwd)"
+    fi
+    
+    # Try multiple possible locations
+    local web_server=""
+    if [ -f "${script_dir}/../web/server.py" ]; then
+        web_server="${script_dir}/../web/server.py"
+    elif [ -f "$HOME/.local/share/auto-cursor/web/server.py" ]; then
+        web_server="$HOME/.local/share/auto-cursor/web/server.py"
+    elif [ -f "/usr/local/share/auto-cursor/web/server.py" ]; then
+        web_server="/usr/local/share/auto-cursor/web/server.py"
+    else
+        # Try to find it relative to current directory
+        local repo_root=""
+        if [ -d ".git" ]; then
+            repo_root="$(pwd)"
+        elif [ -d "web" ]; then
+            repo_root="$(pwd)"
+        else
+            # Try to find auto-cursor repo
+            repo_root=$(find "$HOME" -name "auto-cursor" -type d -path "*/auto-cursor" 2>/dev/null | head -1)
+        fi
+        
+        if [ -n "$repo_root" ] && [ -f "$repo_root/web/server.py" ]; then
+            web_server="$repo_root/web/server.py"
+        fi
+    fi
+    
+    if [ -z "$web_server" ] || [ ! -f "$web_server" ]; then
+        echo -e "${RED}Error: Web server script not found${NC}" >&2
+        echo "Please ensure web/server.py exists in the auto-cursor repository" >&2
+        exit 1
+    fi
+    
+    # Check if Flask is installed
+    if ! python3 -c "import flask" 2>/dev/null; then
+        echo -e "${YELLOW}Flask not found. Installing Flask...${NC}"
+        pip3 install flask flask-cors --user 2>/dev/null || {
+            echo -e "${RED}Error: Could not install Flask. Please install manually:${NC}" >&2
+            echo "  pip3 install flask flask-cors" >&2
+            exit 1
+        }
+    fi
+    
+    echo -e "${GREEN}Starting Auto-Cursor Web Interface...${NC}"
+    echo -e "${CYAN}Server will start on: http://localhost:${port}${NC}"
+    echo -e "${CYAN}Press Ctrl+C to stop${NC}"
+    echo ""
+    
+    # Start server
+    PORT="$port" python3 "$web_server"
 }
 
 # Clean project

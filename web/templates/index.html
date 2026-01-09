@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Auto-Cursor - Web Interface</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="header-content">
+                <h1>🚀 Auto-Cursor</h1>
+                <p>Autonomous Multi-Agent Coding Framework</p>
+            </div>
+        </header>
+
+        <nav class="tabs">
+            <button class="tab active" data-tab="projects">Projects</button>
+            <button class="tab" data-tab="kanban">Kanban Board</button>
+            <button class="tab" data-tab="memory">Memory</button>
+        </nav>
+
+        <!-- Projects Tab -->
+        <div id="projects-tab" class="tab-content active">
+            <div class="projects-header">
+                <h2>Projects</h2>
+                <button id="new-project-btn" class="btn btn-primary">+ New Project</button>
+            </div>
+            <div id="projects-list" class="projects-grid"></div>
+        </div>
+
+        <!-- Kanban Board Tab -->
+        <div id="kanban-tab" class="tab-content">
+            <div class="kanban-header">
+                <select id="project-select" class="project-select">
+                    <option value="">Select a project...</option>
+                </select>
+                <button id="refresh-btn" class="btn btn-secondary">Refresh</button>
+            </div>
+            <div id="kanban-board" class="kanban-board">
+                <div class="kanban-column">
+                    <h3>PENDING</h3>
+                    <div id="pending-column" class="column-content"></div>
+                </div>
+                <div class="kanban-column">
+                    <h3>RUNNING</h3>
+                    <div id="running-column" class="column-content"></div>
+                </div>
+                <div class="kanban-column">
+                    <h3>QA</h3>
+                    <div id="qa-column" class="column-content"></div>
+                </div>
+                <div class="kanban-column">
+                    <h3>COMPLETED</h3>
+                    <div id="completed-column" class="column-content"></div>
+                </div>
+                <div class="kanban-column">
+                    <h3>FAILED</h3>
+                    <div id="failed-column" class="column-content"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Memory Tab -->
+        <div id="memory-tab" class="tab-content">
+            <div class="memory-header">
+                <select id="memory-project-select" class="project-select">
+                    <option value="">Select a project...</option>
+                </select>
+            </div>
+            <div id="memory-content" class="memory-content"></div>
+        </div>
+    </div>
+
+    <!-- New Project Modal -->
+    <div id="new-project-modal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>Create New Project</h2>
+            <form id="new-project-form">
+                <div class="form-group">
+                    <label for="project-path">Project Path:</label>
+                    <input type="text" id="project-path" required placeholder="/path/to/project">
+                </div>
+                <div class="form-group">
+                    <label for="project-id">Project ID:</label>
+                    <input type="text" id="project-id" required placeholder="my-project">
+                </div>
+                <button type="submit" class="btn btn-primary">Create Project</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Plan Modal -->
+    <div id="plan-modal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>Create Plan</h2>
+            <form id="plan-form">
+                <div class="form-group">
+                    <label for="plan-goal">Goal:</label>
+                    <textarea id="plan-goal" required rows="4" placeholder="Describe what you want to build..."></textarea>
+                </div>
+                <button type="submit" class="btn btn-primary">Create Plan</button>
+            </form>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
