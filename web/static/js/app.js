@@ -7,6 +7,84 @@ window.forceLoadProjects = function() {
     loadProjectsForSidebar();
 };
 
+// Direct project injection - bypasses all async logic
+async function directInjectProjects() {
+    console.log('🚀 Direct project injection starting...');
+    try {
+        const response = await fetch('/api/projects', {cache: 'no-cache'});
+        if (!response.ok) {
+            console.error('❌ Direct injection failed:', response.status);
+            return;
+        }
+        const projects = await response.json();
+        console.log('✅ Direct injection got projects:', projects);
+        
+        // Try to find select element with multiple strategies
+        let select = document.getElementById('sidebar-project-select');
+        if (!select) {
+            // Wait a bit and try again
+            await new Promise(resolve => setTimeout(resolve, 100));
+            select = document.getElementById('sidebar-project-select');
+        }
+        
+        if (select) {
+            console.log('✅ Found select in direct injection');
+            // Clear and populate
+            while (select.firstChild) {
+                select.removeChild(select.firstChild);
+            }
+            const defaultOpt = document.createElement('option');
+            defaultOpt.value = '';
+            defaultOpt.textContent = 'Select project...';
+            select.appendChild(defaultOpt);
+            
+            if (projects && projects.length > 0) {
+                projects.forEach(p => {
+                    const opt = document.createElement('option');
+                    opt.value = p.id || p.name;
+                    opt.textContent = p.name || p.id;
+                    select.appendChild(opt);
+                    console.log(`   ✅ Direct injected: ${opt.value}`);
+                });
+                console.log(`✅ Direct injection complete: ${select.options.length} options`);
+            }
+        } else {
+            console.error('❌ Select not found in direct injection');
+        }
+    } catch (error) {
+        console.error('❌ Direct injection error:', error);
+    }
+}
+
+// MutationObserver to watch for select element
+const projectSelectObserver = new MutationObserver((mutations, observer) => {
+    const select = document.getElementById('sidebar-project-select');
+    if (select && select.options.length <= 1) {
+        console.log('👀 MutationObserver detected select element, loading projects...');
+        observer.disconnect();
+        loadProjectsForSidebar();
+        directInjectProjects();
+    }
+});
+
+// Start observing when DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        const select = document.getElementById('sidebar-project-select');
+        if (select) {
+            projectSelectObserver.observe(select.parentElement, { childList: true, subtree: true });
+        }
+        // Also try direct injection
+        setTimeout(directInjectProjects, 100);
+    });
+} else {
+    const select = document.getElementById('sidebar-project-select');
+    if (select) {
+        projectSelectObserver.observe(select.parentElement, { childList: true, subtree: true });
+    }
+    setTimeout(directInjectProjects, 100);
+}
+
 // State Management
 let currentProjectId = null;
 let currentView = 'kanban';
