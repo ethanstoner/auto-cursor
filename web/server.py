@@ -10,8 +10,19 @@ import json
 import subprocess
 import threading
 from pathlib import Path
-from flask import Flask, render_template, jsonify, request
-from flask_cors import CORS
+
+# Add current directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+try:
+    from flask import Flask, render_template, jsonify, request
+    from flask_cors import CORS
+except ImportError:
+    print("Error: Flask not installed. Installing...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--user", "flask", "flask-cors"])
+    from flask import Flask, render_template, jsonify, request
+    from flask_cors import CORS
+
 from datetime import datetime
 
 # Default port - uncommon to avoid conflicts

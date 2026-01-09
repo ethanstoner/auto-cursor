@@ -916,7 +916,10 @@ show_memory() {
 start_web_interface() {
     local port="${1:-8765}"
     
-    # Find web server script
+    # Find web server script - try multiple locations
+    local web_server=""
+    
+    # Method 1: Relative to script location (if installed in repo)
     local script_dir=""
     if [ -f "${BASH_SOURCE[0]}" ]; then
         script_dir=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
@@ -924,34 +927,32 @@ start_web_interface() {
         script_dir="$(cd "$(dirname "$0")" && pwd)"
     fi
     
-    # Try multiple possible locations
-    local web_server=""
+    # Try relative to bin/ directory (repo structure)
     if [ -f "${script_dir}/../web/server.py" ]; then
-        web_server="${script_dir}/../web/server.py"
+        web_server="$(cd "${script_dir}/../web" && pwd)/server.py"
+    # Try if we're in the repo root
+    elif [ -f "web/server.py" ]; then
+        web_server="$(pwd)/web/server.py"
+    # Try common installation locations
     elif [ -f "$HOME/.local/share/auto-cursor/web/server.py" ]; then
         web_server="$HOME/.local/share/auto-cursor/web/server.py"
     elif [ -f "/usr/local/share/auto-cursor/web/server.py" ]; then
         web_server="/usr/local/share/auto-cursor/web/server.py"
     else
-        # Try to find it relative to current directory
-        local repo_root=""
-        if [ -d ".git" ]; then
-            repo_root="$(pwd)"
-        elif [ -d "web" ]; then
-            repo_root="$(pwd)"
-        else
-            # Try to find auto-cursor repo
-            repo_root=$(find "$HOME" -name "auto-cursor" -type d -path "*/auto-cursor" 2>/dev/null | head -1)
-        fi
-        
-        if [ -n "$repo_root" ] && [ -f "$repo_root/web/server.py" ]; then
-            web_server="$repo_root/web/server.py"
-        fi
+        # Try to find auto-cursor repo in common locations
+        for search_dir in "$HOME" "/opt" "/usr/local"; do
+            local found=$(find "$search_dir" -name "auto-cursor" -type d -path "*/auto-cursor" 2>/dev/null | head -1)
+            if [ -n "$found" ] && [ -f "$found/web/server.py" ]; then
+                web_server="$found/web/server.py"
+                break
+            fi
+        done
     fi
     
     if [ -z "$web_server" ] || [ ! -f "$web_server" ]; then
         echo -e "${RED}Error: Web server script not found${NC}" >&2
         echo "Please ensure web/server.py exists in the auto-cursor repository" >&2
+        echo "Current script location: $script_dir" >&2
         exit 1
     fi
     
@@ -970,8 +971,12 @@ start_web_interface() {
     echo -e "${CYAN}Press Ctrl+C to stop${NC}"
     echo ""
     
+    # Change to web directory for proper template/static resolution
+    local web_dir=$(dirname "$web_server")
+    cd "$web_dir"
+    
     # Start server
-    PORT="$port" python3 "$web_server"
+    PORT="$port" python3 server.py
 }
 
 # Clean project
