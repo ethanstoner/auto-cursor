@@ -773,6 +773,7 @@ async function updateTaskStatus(taskId, newColumn) {
 
 // Agent Terminals - with smooth updates
 let agentLogIntervals = {};
+let agentLogStreams = {}; // Track SSE connections
 
 async function loadAgentTerminals() {
     // Stale-while-revalidate: keep old agents visible
@@ -876,34 +877,37 @@ async function loadAgentTerminals() {
                         if (terminalEl.parentNode) {
                             terminalEl.remove();
                         }
-                        // Clear interval
+                        // Clear interval and stream
                         if (agentLogIntervals[agentId]) {
                             clearInterval(agentLogIntervals[agentId]);
                             delete agentLogIntervals[agentId];
+                        }
+                        if (agentLogStreams[agentId]) {
+                            stopAgentLogStream(agentId);
                         }
                     }, 300);
                 }
             }
         });
         
-        // Load/update terminal logs for each agent (with auto-refresh)
+        // Load/update terminal logs for each agent (with live streaming for running agents)
         agents.forEach(agent => {
-            // Load immediately
+            // Load initial logs immediately
             if (currentProjectId) {
                 loadAgentLogsFromAPI(currentProjectId, agent.id);
             }
             
-            // Set up auto-refresh for running agents
+            // Set up live streaming for running agents
             if (agent.status === 'running') {
-                if (!agentLogIntervals[agent.id]) {
-                    agentLogIntervals[agent.id] = setInterval(() => {
-                        if (currentProjectId) {
-                            loadAgentLogsFromAPI(currentProjectId, agent.id);
-                        }
-                    }, 2000); // Refresh every 2 seconds
+                if (!agentLogStreams[agent.id]) {
+                    startAgentLogStream(currentProjectId, agent.id);
                 }
             } else {
-                // Stop refreshing for non-running agents
+                // Stop streaming for non-running agents
+                if (agentLogStreams[agent.id]) {
+                    stopAgentLogStream(agent.id);
+                }
+                // Also clear any polling intervals
                 if (agentLogIntervals[agent.id]) {
                     clearInterval(agentLogIntervals[agent.id]);
                     delete agentLogIntervals[agent.id];
@@ -938,40 +942,14 @@ async function loadAgentLogsFromAPI(projectId, agentId) {
         const data = await response.json();
         
         if (data.logs && data.logs.length > 0) {
-            // Incremental update: only append new log lines, don't replace all
-            const existingLogs = Array.from(terminalEl.querySelectorAll('.log-line')).map(el => el.textContent.trim());
-            const newLogs = data.logs
-                .map(log => log.message || log)
-                .filter(log => !existingLogs.includes(String(log).trim()));
-            
-            const wasAtBottom = terminalEl.scrollHeight - terminalEl.scrollTop < terminalEl.clientHeight + 100;
-            
-            // Only update if there are new logs
-            if (newLogs.length > 0) {
-                // Append new logs (no innerHTML replacement)
-                newLogs.forEach(log => {
-                    const logLine = document.createElement('div');
-                    logLine.className = `log-line ${data.logs.find(l => (l.message || l) === log)?.type || 'info'}`;
-                    logLine.textContent = log;
-                    logLine.style.opacity = '0';
-                    terminalEl.appendChild(logLine);
-                    
-                    // Fade in new log line
-                    requestAnimationFrame(() => {
-                        logLine.style.transition = 'opacity 0.2s ease';
-                        logLine.style.opacity = '1';
-                    });
-                });
-            } else if (existingLogs.length === 0) {
-                // First load - show all logs
+            // First load - show all logs
+            if (terminalEl.children.length === 0 || terminalEl.innerHTML.includes('Loading logs') || terminalEl.innerHTML.includes('No logs')) {
                 const allContent = data.logs.map(log => 
                     `<div class="log-line ${log.type || 'info'}">${escapeHtml(log.message || log)}</div>`
                 ).join('');
                 terminalEl.innerHTML = allContent;
-            }
-            
-            // Auto-scroll to bottom if user was already at bottom
-            if (wasAtBottom) {
+                
+                // Auto-scroll to bottom on first load
                 requestAnimationFrame(() => {
                     terminalEl.scrollTop = terminalEl.scrollHeight;
                 });
@@ -991,6 +969,83 @@ async function loadAgentLogsFromAPI(projectId, agentId) {
     }
 }
 
+function startAgentLogStream(projectId, agentId) {
+    // Close existing stream if any
+    if (agentLogStreams[agentId]) {
+        stopAgentLogStream(agentId);
+    }
+    
+    const terminalEl = document.getElementById(`terminal-${agentId}`);
+    if (!terminalEl) return;
+    
+    try {
+        const eventSource = new EventSource(`${API_BASE}/projects/${projectId}/agent-logs/${agentId}/stream`);
+        
+        eventSource.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                const wasAtBottom = terminalEl.scrollHeight - terminalEl.scrollTop < terminalEl.clientHeight + 100;
+                
+                // Append new log line
+                const logLine = document.createElement('div');
+                logLine.className = `log-line ${data.type || 'info'}`;
+                logLine.textContent = data.message;
+                logLine.style.opacity = '0';
+                terminalEl.appendChild(logLine);
+                
+                // Fade in new log line
+                requestAnimationFrame(() => {
+                    logLine.style.transition = 'opacity 0.2s ease';
+                    logLine.style.opacity = '1';
+                });
+                
+                // Auto-scroll to bottom if user was already at bottom
+                if (wasAtBottom) {
+                    requestAnimationFrame(() => {
+                        terminalEl.scrollTop = terminalEl.scrollHeight;
+                    });
+                }
+                
+                // Limit to last 1000 lines to prevent memory issues
+                const logLines = terminalEl.querySelectorAll('.log-line');
+                if (logLines.length > 1000) {
+                    logLines[0].remove();
+                }
+            } catch (e) {
+                console.error('Error parsing SSE message:', e);
+            }
+        };
+        
+        eventSource.onerror = (error) => {
+            console.error('SSE error for agent', agentId, error);
+            // Reconnect after a delay
+            setTimeout(() => {
+                if (agentLogStreams[agentId]) {
+                    stopAgentLogStream(agentId);
+                    startAgentLogStream(projectId, agentId);
+                }
+            }, 3000);
+        };
+        
+        agentLogStreams[agentId] = eventSource;
+    } catch (error) {
+        console.error('Error starting log stream:', error);
+        // Fallback to polling
+        if (!agentLogIntervals[agentId]) {
+            agentLogIntervals[agentId] = setInterval(() => {
+                loadAgentLogsFromAPI(projectId, agentId);
+            }, 2000);
+        }
+    }
+}
+
+function stopAgentLogStream(agentId) {
+    if (agentLogStreams[agentId]) {
+        agentLogStreams[agentId].close();
+        delete agentLogStreams[agentId];
+    }
+}
+
 function renderAgentTerminal(agent) {
     const statusClass = agent.status === 'running' ? 'running' : 
                        agent.status === 'completed' ? 'idle' :
@@ -1002,8 +1057,42 @@ function renderAgentTerminal(agent) {
         displayId = displayId.substring(currentProjectId.length + 1);
     }
     
+    const statusIcons = {
+        'running': 'https://unpkg.com/lucide-static@latest/icons/play-circle.svg',
+        'completed': 'https://unpkg.com/lucide-static@latest/icons/check-circle.svg',
+        'failed': 'https://unpkg.com/lucide-static@latest/icons/x-circle.svg',
+        'pending': 'https://unpkg.com/lucide-static@latest/icons/clock.svg'
+    };
+    
+    const statusLabels = {
+        'running': 'Running',
+        'completed': 'Completed',
+        'failed': 'Failed',
+        'pending': 'Pending',
+        'qa_running': 'QA Running'
+    };
+    
     return `
-        <div class="agent-terminal" data-agent-id="${escapeHtml(agent.id)}">
+        <div class="agent-terminal" data-agent-id="${escapeHtml(agent.id)}" data-status="${escapeHtml(agent.status)}">
+            <div class="agent-terminal-header">
+                <div class="agent-terminal-title">
+                    <h3>
+                        <img src="${statusIcons[agent.status] || statusIcons.pending}" alt="${agent.status}" class="status-icon-small" style="width: 14px; height: 14px; margin-right: 6px; vertical-align: middle;">
+                        ${escapeHtml(displayId)}
+                    </h3>
+                    ${agent.last_update ? `<div class="agent-last-update">${escapeHtml(agent.last_update.substring(0, 100))}</div>` : ''}
+                </div>
+                <div class="agent-status">
+                    <span class="status-dot ${statusClass}"></span>
+                    <span>${escapeHtml(statusLabels[agent.status] || agent.status)}</span>
+                </div>
+            </div>
+            <div id="terminal-${escapeHtml(agent.id)}" class="agent-terminal-output" data-agent-id="${escapeHtml(agent.id)}">
+                <div class="log-line info">Loading logs...</div>
+            </div>
+        </div>
+    `;
+}
             <div class="agent-terminal-header">
                 <div class="agent-terminal-title">
                     <h3>${escapeHtml(displayId)}</h3>

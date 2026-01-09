@@ -1123,6 +1123,55 @@ h3 {
   color: rgba(0, 122, 255, 1);
 }
 
+.agent-terminal-output .log-line.warning {
+  color: rgba(255, 193, 7, 1);
+}
+
+.status-icon-small {
+  filter: invert(1);
+  opacity: 0.8;
+}
+
+.agent-terminal[data-status="running"] {
+  border-left: 3px solid rgba(255, 193, 7, 1);
+}
+
+.agent-terminal[data-status="completed"] {
+  border-left: 3px solid rgba(52, 199, 89, 1);
+}
+
+.agent-terminal[data-status="failed"] {
+  border-left: 3px solid rgba(255, 59, 48, 1);
+}
+
+.agent-terminal[data-status="pending"] {
+  border-left: 3px solid rgba(142, 142, 147, 1);
+}
+
+/* Live indicator for streaming */
+.agent-terminal[data-status="running"]::after {
+  content: '';
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 8px;
+  height: 8px;
+  background: rgba(52, 199, 89, 1);
+  border-radius: 50%;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(1.2);
+  }
+}
+
 /* Insights */
 .insights-content {
   padding: var(--spacing-lg);

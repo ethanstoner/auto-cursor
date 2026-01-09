@@ -1083,6 +1083,72 @@ def api_agent_logs(project_id, agent_id):
     
     return jsonify({'logs': logs})
 
+@app.route('/api/projects/<project_id>/agent-logs/<agent_id>/stream', methods=['GET'])
+def api_agent_logs_stream(project_id, agent_id):
+    """Stream live log content for a specific agent using Server-Sent Events"""
+    from flask import Response, stream_with_context
+    import time
+    
+    def generate():
+        # Find log file
+        all_agents = get_running_agents()
+        agent = next((a for a in all_agents if a['id'] == agent_id), None)
+        log_path = None
+        
+        if agent and agent.get('log_path'):
+            log_path = Path(agent['log_path'])
+        else:
+            cursor_agents_logs = Path('/tmp/cursor-agents/logs')
+            if cursor_agents_logs.exists():
+                possible_logs = [
+                    cursor_agents_logs / f'{agent_id}.log',
+                    cursor_agents_logs / f'web-{agent_id}.log',
+                ]
+                for possible_log in possible_logs:
+                    if possible_log.exists():
+                        log_path = possible_log
+                        break
+        
+        if not log_path or not log_path.exists():
+            yield f"data: {json.dumps({'type': 'info', 'message': 'No log file found'})}\n\n"
+            return
+        
+        # Track last position in file
+        last_position = 0
+        if log_path.exists():
+            last_position = log_path.stat().st_size
+        
+        # Stream new lines
+        while True:
+            try:
+                if log_path.exists():
+                    with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        f.seek(last_position)
+                        new_lines = f.readlines()
+                        last_position = f.tell()
+                        
+                        for line in new_lines:
+                            line = strip_ansi(line.strip())
+                            if line:
+                                log_type = 'info'
+                                line_lower = line.lower()
+                                if 'error' in line_lower or 'failed' in line_lower or 'exception' in line_lower:
+                                    log_type = 'error'
+                                elif 'success' in line_lower or 'completed' in line_lower or 'done' in line_lower:
+                                    log_type = 'success'
+                                elif 'warning' in line_lower or 'warn' in line_lower:
+                                    log_type = 'warning'
+                                
+                                yield f"data: {json.dumps({'type': log_type, 'message': line})}\n\n"
+                
+                time.sleep(0.5)  # Check every 500ms for new logs
+            except Exception as e:
+                yield f"data: {json.dumps({'type': 'error', 'message': f'Stream error: {str(e)}'})}\n\n"
+                break
+    
+    return Response(stream_with_context(generate()), mimetype='text/event-stream',
+                   headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
+
 @app.route('/api/github/issues', methods=['GET'])
 def api_github_issues():
     """Get GitHub issues from ethanstoner/auto-cursor"""
