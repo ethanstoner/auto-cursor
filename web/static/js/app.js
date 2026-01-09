@@ -41,10 +41,19 @@ function initializeApp() {
         loadInitialData().then(() => {
             console.log('✅ Initial data loaded');
             startGlobalRefresh();
+            // Force reload projects after a short delay to ensure DOM is ready
+            setTimeout(() => {
+                console.log('🔄 Force reloading projects after initialization...');
+                loadProjectsForSidebar().catch(err => console.error('Error in force reload:', err));
+            }, 500);
         }).catch(err => {
             console.error('❌ Error loading initial data:', err);
             // Still start refresh even if initial load fails
             startGlobalRefresh();
+            // Try loading projects again
+            setTimeout(() => {
+                loadProjectsForSidebar().catch(e => console.error('Error in retry:', e));
+            }, 1000);
         });
         console.log('✅ Initialization complete');
     } catch (error) {
@@ -73,7 +82,7 @@ setTimeout(() => {
             refreshStats().catch(err => console.error('Fallback stats error:', err));
         }
     }
-}, 5000);
+}, 2000); // Reduced from 5000 to 2000 for faster retry
 
 // Sidebar Management
 function initializeSidebar() {
