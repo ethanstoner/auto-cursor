@@ -1120,6 +1120,7 @@ def api_github_issues():
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', DEFAULT_PORT))
-    print(f"🚀 Auto-Cursor Web Interface starting on http://localhost:{port}")
+    host = os.environ.get('HOST', '0.0.0.0')  # 0.0.0.0 for Docker
+    print(f"🚀 Auto-Cursor Web Interface starting on http://{host}:{port}")
     print(f"📊 Open your browser to view the kanban board")
-    app.run(host='127.0.0.1', port=port, debug=False)
+    app.run(host=host, port=port, debug=False)

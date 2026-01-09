@@ -1899,6 +1899,50 @@ body.sidebar-collapsed .main-content {
   }
 }
 
+/* Updating indicator styles (stale-while-revalidate) */
+.updating-indicator {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.75rem;
+    color: rgba(142, 142, 147, 0.8);
+    z-index: 10;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+}
+
+.updating-spinner {
+    width: 12px;
+    height: 12px;
+    border: 2px solid rgba(142, 142, 147, 0.3);
+    border-top-color: rgba(142, 142, 147, 0.8);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+/* Smooth progress bar transitions */
+.progress-bar {
+    transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+/* Prevent layout shift on task cards */
+.task-card {
+    min-height: 120px;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+/* Stable column layout */
+.kanban-column {
+    min-height: 200px;
+}
+
+.column-content {
+    min-height: 150px;
+}
+
 /* Smooth scroll utility */
 @media (prefers-reduced-motion: reduce) {
   * {
@@ -1909,5 +1953,9 @@ body.sidebar-collapsed .main-content {
   
   html {
     scroll-behavior: auto;
+  }
+  
+  .updating-spinner {
+      animation: none;
   }
 }
