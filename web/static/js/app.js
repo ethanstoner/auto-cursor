@@ -422,25 +422,70 @@ function updateTaskCard(cardEl, task) {
         statusText.style.color = statusColor;
     }
     
-    // Update timestamp
+    // Update timestamp - use completed time for completed tasks
     const timeEl = cardEl.querySelector('.task-time');
+    const elapsedEl = cardEl.querySelector('.task-elapsed');
+    
     if (timeEl) {
         let timeDisplay = '';
-        if (task.started) {
-            const started = typeof task.started === 'number' ? new Date(task.started * 1000) : new Date(task.started);
+        let elapsedTime = '';
+        
+        if (task.completed && (task.status === 'completed' || task.status === 'qa_passed')) {
+            // For completed tasks, show when it was completed
+            const completed = typeof task.completed === 'number' ? new Date(task.completed * 1000) : new Date(task.completed);
             const now = new Date();
-            const diffMs = now - started;
+            const diffMs = now - completed;
             const diffMins = Math.floor(diffMs / 60000);
             if (diffMins < 1) timeDisplay = 'Just now';
             else if (diffMins < 60) timeDisplay = `${diffMins}m ago`;
             else {
                 const diffHours = Math.floor(diffMins / 60);
-                timeDisplay = `${diffHours}h ago`;
+                if (diffHours < 24) {
+                    timeDisplay = `${diffHours}h ago`;
+                } else {
+                    const diffDays = Math.floor(diffHours / 24);
+                    timeDisplay = `${diffDays}d ago`;
+                }
             }
+            
+            // Calculate elapsed time (start to completion)
+            if (task.started) {
+                const started = typeof task.started === 'string' ? new Date(task.started) : new Date(task.started * 1000);
+                const elapsedMs = completed - started;
+                const elapsedMins = Math.floor(elapsedMs / 60000);
+                if (elapsedMins < 1) elapsedTime = '< 1m';
+                else if (elapsedMins < 60) elapsedTime = `${elapsedMins}m`;
+                else {
+                    const elapsedHours = Math.floor(elapsedMins / 60);
+                    elapsedTime = `${elapsedHours}h ${elapsedMins % 60}m`;
+                }
+            }
+        } else if (task.started && (task.status === 'running' || task.status === 'qa_running')) {
+            // For running tasks, show how long it's been running
+            const started = typeof task.started === 'string' ? new Date(task.started) : new Date(task.started * 1000);
+            const now = new Date();
+            const diffMs = now - started;
+            const diffMins = Math.floor(diffMs / 60000);
+            if (diffMins < 1) timeDisplay = 'Just started';
+            else if (diffMins < 60) timeDisplay = `Running ${diffMins}m`;
+            else {
+                const diffHours = Math.floor(diffMins / 60);
+                timeDisplay = `Running ${diffHours}h ${diffMins % 60}m`;
+            }
+            elapsedTime = timeDisplay;
         } else {
             timeDisplay = 'Just now';
         }
+        
         timeEl.textContent = timeDisplay;
+        
+        // Update elapsed time if element exists
+        if (elapsedEl && elapsedTime) {
+            elapsedEl.textContent = elapsedTime;
+            elapsedEl.style.display = 'inline';
+        } else if (elapsedEl) {
+            elapsedEl.style.display = 'none';
+        }
     }
 }
 
@@ -526,19 +571,53 @@ function renderTaskCard(task) {
     else if (status === 'completed' || status === 'qa_passed') progress = 100;
     else if (status === 'failed' || status === 'qa_failed') progress = 0;
     
-    // Format timestamp
+    // Format timestamp - use completed time for completed tasks, started time for running tasks
     let timeDisplay = '';
-    if (task.started) {
-        const started = new Date(task.started * 1000);
+    let elapsedTime = '';
+    
+    if (task.completed && (status === 'completed' || status === 'qa_passed')) {
+        // For completed tasks, show when it was completed
+        const completed = typeof task.completed === 'number' ? new Date(task.completed * 1000) : new Date(task.completed);
         const now = new Date();
-        const diffMs = now - started;
+        const diffMs = now - completed;
         const diffMins = Math.floor(diffMs / 60000);
         if (diffMins < 1) timeDisplay = 'Just now';
         else if (diffMins < 60) timeDisplay = `${diffMins}m ago`;
         else {
             const diffHours = Math.floor(diffMins / 60);
-            timeDisplay = `${diffHours}h ago`;
+            if (diffHours < 24) {
+                timeDisplay = `${diffHours}h ago`;
+            } else {
+                const diffDays = Math.floor(diffHours / 24);
+                timeDisplay = `${diffDays}d ago`;
+            }
         }
+        
+        // Calculate elapsed time (start to completion)
+        if (task.started) {
+            const started = typeof task.started === 'string' ? new Date(task.started) : new Date(task.started * 1000);
+            const elapsedMs = completed - started;
+            const elapsedMins = Math.floor(elapsedMs / 60000);
+            if (elapsedMins < 1) elapsedTime = '< 1m';
+            else if (elapsedMins < 60) elapsedTime = `${elapsedMins}m`;
+            else {
+                const elapsedHours = Math.floor(elapsedMins / 60);
+                elapsedTime = `${elapsedHours}h ${elapsedMins % 60}m`;
+            }
+        }
+    } else if (task.started && (status === 'running' || status === 'qa_running')) {
+        // For running tasks, show how long it's been running
+        const started = typeof task.started === 'string' ? new Date(task.started) : new Date(task.started * 1000);
+        const now = new Date();
+        const diffMs = now - started;
+        const diffMins = Math.floor(diffMs / 60000);
+        if (diffMins < 1) timeDisplay = 'Just started';
+        else if (diffMins < 60) timeDisplay = `Running ${diffMins}m`;
+        else {
+            const diffHours = Math.floor(diffMins / 60);
+            timeDisplay = `Running ${diffHours}h ${diffMins % 60}m`;
+        }
+        elapsedTime = timeDisplay;
     } else if (task.timestamp) {
         timeDisplay = task.timestamp;
     } else {
@@ -557,9 +636,14 @@ function renderTaskCard(task) {
                 ${task.description ? `<p class="task-description">${escapeHtml(task.description.substring(0, 120))}${task.description.length > 120 ? '...' : ''}</p>` : ''}
                 <div class="task-progress-container">
                     <div class="task-progress">
-                        <div class="progress-bar" style="width: ${progress}%; background: ${statusColor}; opacity: 0.8"></div>
+                        <div class="progress-bar" style="width: ${progress}%; background: ${statusColor}; opacity: 0.9">
+                            <div class="progress-bar-shine"></div>
+                        </div>
                     </div>
-                    <span class="progress-text">${progress}%</span>
+                    <div class="progress-info">
+                        <span class="progress-text">${progress}%</span>
+                        ${elapsedTime ? `<span class="task-elapsed">${elapsedTime}</span>` : ''}
+                    </div>
                 </div>
             </div>
             <div class="task-footer">
@@ -567,7 +651,9 @@ function renderTaskCard(task) {
                     <span class="status-dot" style="background: ${statusColor}"></span>
                     <span class="task-status" style="color: ${statusColor}">${escapeHtml(statusLabels[status])}</span>
                 </div>
-                ${timeDisplay ? `<span class="task-time">${timeDisplay}</span>` : ''}
+                <div class="task-time-info">
+                    ${timeDisplay ? `<span class="task-time" title="${task.completed ? 'Completed' : task.started ? 'Started' : ''}">${timeDisplay}</span>` : ''}
+                </div>
             </div>
             ${task.status === 'running' ? `
                 <div class="task-actions">
