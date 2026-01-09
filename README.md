@@ -57,6 +57,8 @@ which orchestrate-agents
 
 ## Quick Start
 
+### CLI Usage
+
 1. **Initialize a project** - Select a git repository folder
 2. **Create a plan** - Describe what you want to build
 3. **Start execution** - Agents work autonomously
@@ -80,6 +82,24 @@ auto-cursor status my-project-id
 auto-cursor review my-project-id all
 auto-cursor merge my-project-id all
 ```
+
+### Web Interface
+
+Start the web interface for a visual kanban board:
+
+```bash
+# Start web interface (default port 8765)
+auto-cursor web
+
+# Or specify a custom port
+auto-cursor web 9000
+```
+
+Then open your browser to `http://localhost:8765` to access:
+- **Kanban Board** - Visual task management
+- **Project Management** - Create and manage projects
+- **Memory Viewer** - View project insights
+- **Real-time Updates** - Auto-refresh every 3 seconds
 
 ---
 
