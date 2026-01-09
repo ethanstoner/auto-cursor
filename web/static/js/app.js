@@ -7,6 +7,14 @@ let currentView = 'kanban';
 let refreshIntervals = {};
 let draggedTask = null;
 
+// Stale-while-revalidate data cache (prevents black flashing)
+let dataCache = {
+    kanban: null,
+    agents: null,
+    stats: null,
+    lastFetch: {}
+};
+
 // Smooth content update helper to prevent black flash during refreshes
 function smoothUpdate(element, newHTML) {
     if (!element) return;
@@ -194,18 +202,24 @@ function loadViewData(viewName) {
     }
 }
 
-// Kanban Board
+// Kanban Board - Stale-while-revalidate pattern (no black flashing)
 async function loadKanban() {
     if (!currentProjectId) {
         const board = document.getElementById('kanban-board');
-        if (board) {
+        if (board && !dataCache.kanban) {
             board.innerHTML = '<div class="empty-state"><h3>Select a project</h3><p>Choose a project from the sidebar to view the kanban board</p></div>';
         }
         return;
     }
     
+    // Show subtle updating indicator (only if we have cached data)
+    const isRefreshing = dataCache.kanban !== null;
+    if (isRefreshing) {
+        showUpdatingIndicator('kanban');
+    }
+    
     try {
-        const response = await fetch(`${API_BASE}/projects/${currentProjectId}/status`);
+        const response = await fetch(`${API_BASE}/projects/${currentProjectId}/status`, {cache: 'no-cache'});
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
         }
@@ -241,7 +255,7 @@ async function loadKanban() {
             'done': processedTasks.filter(t => t.status === 'completed' || t.status === 'qa_passed' || t.status === 'failed' || t.status === 'qa_failed')
         };
         
-        // Update column counts with smooth animation
+        // Update column counts with smooth animation (no remounting)
         Object.keys(columnMapping).forEach(column => {
             const count = columnMapping[column].length;
             const countEl = document.getElementById(`count-${column}`);
@@ -264,32 +278,203 @@ async function loadKanban() {
             }
         });
         
-        // Render tasks in columns with smooth transition
+        // CRITICAL: Incremental DOM updates (no innerHTML replacement)
+        // Only update/add/remove individual cards, never clear entire column
         Object.keys(columnMapping).forEach(column => {
             const columnEl = document.getElementById(`${column}-column`);
             if (!columnEl) return;
             
-            const tasks = columnMapping[column];
-            const newContent = tasks.length === 0 
-                ? '<div class="empty-state" style="padding: 20px; color: #999; font-size: 0.875rem;">No tasks</div>'
-                : tasks.map(task => renderTaskCard(task)).join('');
+            const newTasks = columnMapping[column];
+            const newTaskIds = new Set(newTasks.map(t => t.id));
             
-            // Smooth update - fade out old, fade in new
-            if (columnEl.innerHTML !== newContent) {
-                columnEl.style.opacity = '0.7';
-                columnEl.style.transition = 'opacity 0.2s ease';
-                setTimeout(() => {
-                    columnEl.innerHTML = newContent;
-                    columnEl.style.opacity = '1';
-                }, 100);
+            // Get existing cards (stable keys)
+            const existingCards = Array.from(columnEl.querySelectorAll('.task-card'));
+            const existingTaskIds = new Set(existingCards.map(card => card.dataset.taskId));
+            
+            // Remove cards that no longer exist
+            existingCards.forEach(card => {
+                const taskId = card.dataset.taskId;
+                if (!newTaskIds.has(taskId)) {
+                    // Animate out before removing
+                    card.style.opacity = '0';
+                    card.style.transform = 'scale(0.95)';
+                    card.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
+                    setTimeout(() => {
+                        if (card.parentNode) {
+                            card.remove();
+                        }
+                    }, 200);
+                }
+            });
+            
+            // Update existing cards or add new ones
+            newTasks.forEach(task => {
+                let cardEl = columnEl.querySelector(`[data-task-id="${task.id}"]`);
+                
+                if (cardEl) {
+                    // Update existing card (incremental update, no remount)
+                    updateTaskCard(cardEl, task);
+                } else {
+                    // Add new card (with fade-in animation)
+                    const newCardHtml = renderTaskCard(task);
+                    const tempDiv = document.createElement('div');
+                    tempDiv.innerHTML = newCardHtml;
+                    const newCard = tempDiv.firstElementChild;
+                    
+                    // Start invisible, then fade in
+                    newCard.style.opacity = '0';
+                    newCard.style.transform = 'translateY(10px)';
+                    columnEl.appendChild(newCard);
+                    
+                    // Animate in
+                    requestAnimationFrame(() => {
+                        newCard.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+                        newCard.style.opacity = '1';
+                        newCard.style.transform = 'translateY(0)';
+                    });
+                }
+            });
+            
+            // Handle empty state (only if no tasks and no existing content)
+            if (newTasks.length === 0 && existingCards.length === 0) {
+                if (!columnEl.querySelector('.empty-state')) {
+                    const emptyState = document.createElement('div');
+                    emptyState.className = 'empty-state';
+                    emptyState.style.cssText = 'padding: 20px; color: #999; font-size: 0.875rem;';
+                    emptyState.textContent = 'No tasks';
+                    columnEl.appendChild(emptyState);
+                }
+            } else {
+                // Remove empty state if tasks exist
+                const emptyState = columnEl.querySelector('.empty-state');
+                if (emptyState) {
+                    emptyState.remove();
+                }
             }
         });
         
-        // Re-initialize drag-drop
+        // Cache the data for next refresh
+        dataCache.kanban = { tasks: processedTasks, columnMapping, timestamp: Date.now() };
+        dataCache.lastFetch.kanban = Date.now();
+        
+        // Hide updating indicator
+        hideUpdatingIndicator('kanban');
+        
+        // Re-initialize drag-drop (only for new cards)
         initializeTaskDragDrop();
         
     } catch (error) {
         console.error('Error loading kanban:', error);
+        hideUpdatingIndicator('kanban');
+        // Keep cached data on error - don't clear UI
+        if (!dataCache.kanban) {
+            const board = document.getElementById('kanban-board');
+            if (board) {
+                board.innerHTML = `<div class="empty-state"><h3>Error loading kanban</h3><p>${escapeHtml(error.message)}</p></div>`;
+            }
+        }
+    }
+}
+
+// Update existing task card without remounting
+function updateTaskCard(cardEl, task) {
+    if (!cardEl) return;
+    
+    // Update status attribute
+    cardEl.dataset.status = task.status;
+    
+    // Update progress bar (smooth transition)
+    const progressBar = cardEl.querySelector('.progress-bar');
+    const progressText = cardEl.querySelector('.progress-text');
+    if (progressBar && progressText) {
+        const newProgress = task.progress || 0;
+        progressBar.style.transition = 'width 0.3s ease';
+        progressBar.style.width = `${newProgress}%`;
+        progressText.textContent = `${newProgress}%`;
+    }
+    
+    // Update status dot and text
+    const statusDot = cardEl.querySelector('.status-dot');
+    const statusText = cardEl.querySelector('.task-status');
+    if (statusDot && statusText) {
+        const statusColors = {
+            'pending': 'rgba(0, 122, 255, 1)',
+            'running': 'rgba(255, 193, 7, 1)',
+            'qa_running': 'rgba(88, 86, 214, 1)',
+            'completed': 'rgba(52, 199, 89, 1)',
+            'failed': 'rgba(255, 59, 48, 1)',
+            'qa_passed': 'rgba(52, 199, 89, 1)',
+            'qa_failed': 'rgba(255, 59, 48, 1)'
+        };
+        const statusLabels = {
+            'pending': 'Pending',
+            'running': 'Running',
+            'qa_running': 'QA Running',
+            'completed': 'Completed',
+            'failed': 'Failed',
+            'qa_passed': 'QA Passed',
+            'qa_failed': 'QA Failed'
+        };
+        const status = task.status || 'pending';
+        const statusColor = statusColors[status] || statusColors['pending'];
+        statusDot.style.background = statusColor;
+        statusText.textContent = statusLabels[status] || status;
+        statusText.style.color = statusColor;
+    }
+    
+    // Update timestamp
+    const timeEl = cardEl.querySelector('.task-time');
+    if (timeEl) {
+        let timeDisplay = '';
+        if (task.started) {
+            const started = typeof task.started === 'number' ? new Date(task.started * 1000) : new Date(task.started);
+            const now = new Date();
+            const diffMs = now - started;
+            const diffMins = Math.floor(diffMs / 60000);
+            if (diffMins < 1) timeDisplay = 'Just now';
+            else if (diffMins < 60) timeDisplay = `${diffMins}m ago`;
+            else {
+                const diffHours = Math.floor(diffMins / 60);
+                timeDisplay = `${diffHours}h ago`;
+            }
+        } else {
+            timeDisplay = 'Just now';
+        }
+        timeEl.textContent = timeDisplay;
+    }
+}
+
+// Show subtle updating indicator
+function showUpdatingIndicator(view) {
+    const viewEl = document.getElementById(`view-${view}`);
+    if (!viewEl) return;
+    
+    let indicator = viewEl.querySelector('.updating-indicator');
+    if (!indicator) {
+        indicator = document.createElement('div');
+        indicator.className = 'updating-indicator';
+        indicator.innerHTML = '<span class="updating-spinner"></span><span>Updating...</span>';
+        indicator.style.cssText = 'position: absolute; top: 10px; right: 10px; display: flex; align-items: center; gap: 6px; font-size: 0.75rem; color: #999; z-index: 10;';
+        viewEl.style.position = 'relative';
+        viewEl.appendChild(indicator);
+    }
+    indicator.style.opacity = '1';
+}
+
+// Hide updating indicator
+function hideUpdatingIndicator(view) {
+    const viewEl = document.getElementById(`view-${view}`);
+    if (!viewEl) return;
+    
+    const indicator = viewEl.querySelector('.updating-indicator');
+    if (indicator) {
+        indicator.style.transition = 'opacity 0.3s ease';
+        indicator.style.opacity = '0';
+        setTimeout(() => {
+            if (indicator.parentNode) {
+                indicator.remove();
+            }
+        }, 300);
     }
 }
 
@@ -504,12 +689,20 @@ async function updateTaskStatus(taskId, newColumn) {
 let agentLogIntervals = {};
 
 async function loadAgentTerminals() {
+    // Stale-while-revalidate: keep old agents visible
+    const cachedAgents = dataCache.agents;
+    const isRefreshing = cachedAgents !== null;
+    
+    if (isRefreshing) {
+        showUpdatingIndicator('agents');
+    }
+    
     try {
         // Get agents for current project if available, otherwise all agents
         let agents = [];
         if (currentProjectId) {
             try {
-                const projectResponse = await fetch(`${API_BASE}/projects/${currentProjectId}/agents`);
+                const projectResponse = await fetch(`${API_BASE}/projects/${currentProjectId}/agents`, {cache: 'no-cache'});
                 if (projectResponse.ok) {
                     agents = await projectResponse.json();
                 }
@@ -520,15 +713,23 @@ async function loadAgentTerminals() {
         
         // Fallback to all agents if project agents empty
         if (agents.length === 0) {
-            const response = await fetch(`${API_BASE}/agents`);
+            const response = await fetch(`${API_BASE}/agents`, {cache: 'no-cache'});
             agents = await response.json();
         }
         
         const container = document.getElementById('agents-terminals');
         if (!container) return;
         
+        // Cache agents
+        dataCache.agents = agents;
+        dataCache.lastFetch.agents = Date.now();
+        
         if (agents.length === 0) {
-            smoothUpdate(container, '<div class="empty-state"><h3>No agents running</h3><p>Start a project to see agents in action</p></div>');
+            // Only show empty state if no cached data
+            if (!cachedAgents || cachedAgents.length === 0) {
+                smoothUpdate(container, '<div class="empty-state"><h3>No agents running</h3><p>Start a project to see agents in action</p></div>');
+            }
+            hideUpdatingIndicator('agents');
             return;
         }
         
@@ -536,39 +737,65 @@ async function loadAgentTerminals() {
         const currentAgentIds = Array.from(container.querySelectorAll('.agent-terminal')).map(el => el.dataset.agentId);
         const newAgentIds = agents.map(a => a.id);
         
-        // Update existing terminals or add new ones
+        // Update existing terminals or add new ones (incremental updates)
         agents.forEach(agent => {
             let terminalEl = container.querySelector(`[data-agent-id="${agent.id}"]`);
             if (!terminalEl) {
-                // Add new terminal
-                container.insertAdjacentHTML('beforeend', renderAgentTerminal(agent));
-                terminalEl = container.querySelector(`[data-agent-id="${agent.id}"]`);
+                // Add new terminal (with fade-in)
+                const newTerminalHtml = renderAgentTerminal(agent);
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = newTerminalHtml;
+                const newTerminal = tempDiv.firstElementChild;
+                newTerminal.style.opacity = '0';
+                newTerminal.style.transform = 'translateY(10px)';
+                container.appendChild(newTerminal);
+                
+                requestAnimationFrame(() => {
+                    newTerminal.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+                    newTerminal.style.opacity = '1';
+                    newTerminal.style.transform = 'translateY(0)';
+                });
+                
+                terminalEl = newTerminal;
             }
             
-            // Update status
+            // Update status (incremental, no remount)
             const statusEl = terminalEl.querySelector('.agent-status');
             if (statusEl) {
                 const statusClass = agent.status === 'running' ? 'running' : 
                                    agent.status === 'completed' ? 'idle' :
                                    agent.status === 'failed' ? 'error' : 'waiting';
-                statusEl.innerHTML = `
-                    <span class="status-dot ${statusClass}"></span>
-                    <span>${escapeHtml(agent.status_text || agent.status)}</span>
-                `;
+                const statusText = agent.status_text || agent.status;
+                
+                // Only update if changed
+                const currentText = statusEl.textContent.trim();
+                if (currentText !== statusText) {
+                    statusEl.innerHTML = `
+                        <span class="status-dot ${statusClass}"></span>
+                        <span>${escapeHtml(statusText)}</span>
+                    `;
+                }
             }
         });
         
-        // Remove terminals for agents that are no longer running
+        // Remove terminals for agents that are no longer running (with fade-out)
         currentAgentIds.forEach(agentId => {
             if (!newAgentIds.includes(agentId)) {
                 const terminalEl = container.querySelector(`[data-agent-id="${agentId}"]`);
                 if (terminalEl) {
-                    terminalEl.remove();
-                    // Clear interval
-                    if (agentLogIntervals[agentId]) {
-                        clearInterval(agentLogIntervals[agentId]);
-                        delete agentLogIntervals[agentId];
-                    }
+                    terminalEl.style.opacity = '0';
+                    terminalEl.style.transform = 'translateY(-10px)';
+                    terminalEl.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+                    setTimeout(() => {
+                        if (terminalEl.parentNode) {
+                            terminalEl.remove();
+                        }
+                        // Clear interval
+                        if (agentLogIntervals[agentId]) {
+                            clearInterval(agentLogIntervals[agentId]);
+                            delete agentLogIntervals[agentId];
+                        }
+                    }, 300);
                 }
             }
         });
@@ -598,8 +825,18 @@ async function loadAgentTerminals() {
             }
         });
         
+        hideUpdatingIndicator('agents');
+        
     } catch (error) {
         console.error('Error loading agents:', error);
+        hideUpdatingIndicator('agents');
+        // Keep cached agents on error
+        if (!cachedAgents) {
+            const container = document.getElementById('agents-terminals');
+            if (container) {
+                smoothUpdate(container, `<div class="empty-state"><h3>Error loading agents</h3><p>${escapeHtml(error.message)}</p></div>`);
+            }
+        }
     }
 }
 
@@ -608,21 +845,44 @@ async function loadAgentLogsFromAPI(projectId, agentId) {
     if (!terminalEl) return;
     
     try {
-        const response = await fetch(`${API_BASE}/projects/${projectId}/agent-logs/${agentId}`);
+        const response = await fetch(`${API_BASE}/projects/${projectId}/agent-logs/${agentId}`, {cache: 'no-cache'});
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
         }
         const data = await response.json();
         
         if (data.logs && data.logs.length > 0) {
-            // Smooth update - only change if content is different
-            const newContent = data.logs.map(log => 
-                `<div class="log-line ${log.type || 'info'}">${escapeHtml(log.message || log)}</div>`
-            ).join('');
+            // Incremental update: only append new log lines, don't replace all
+            const existingLogs = Array.from(terminalEl.querySelectorAll('.log-line')).map(el => el.textContent.trim());
+            const newLogs = data.logs
+                .map(log => log.message || log)
+                .filter(log => !existingLogs.includes(String(log).trim()));
             
             const wasAtBottom = terminalEl.scrollHeight - terminalEl.scrollTop < terminalEl.clientHeight + 100;
             
-            terminalEl.innerHTML = newContent;
+            // Only update if there are new logs
+            if (newLogs.length > 0) {
+                // Append new logs (no innerHTML replacement)
+                newLogs.forEach(log => {
+                    const logLine = document.createElement('div');
+                    logLine.className = `log-line ${data.logs.find(l => (l.message || l) === log)?.type || 'info'}`;
+                    logLine.textContent = log;
+                    logLine.style.opacity = '0';
+                    terminalEl.appendChild(logLine);
+                    
+                    // Fade in new log line
+                    requestAnimationFrame(() => {
+                        logLine.style.transition = 'opacity 0.2s ease';
+                        logLine.style.opacity = '1';
+                    });
+                });
+            } else if (existingLogs.length === 0) {
+                // First load - show all logs
+                const allContent = data.logs.map(log => 
+                    `<div class="log-line ${log.type || 'info'}">${escapeHtml(log.message || log)}</div>`
+                ).join('');
+                terminalEl.innerHTML = allContent;
+            }
             
             // Auto-scroll to bottom if user was already at bottom
             if (wasAtBottom) {
@@ -630,12 +890,16 @@ async function loadAgentLogsFromAPI(projectId, agentId) {
                     terminalEl.scrollTop = terminalEl.scrollHeight;
                 });
             }
-        } else if (terminalEl.innerHTML.includes('Loading logs')) {
-            terminalEl.innerHTML = '<div class="log-line info">No logs available yet. Agent may still be starting...</div>';
+        } else {
+            // Only show "no logs" if container is empty
+            if (terminalEl.children.length === 0 || terminalEl.innerHTML.includes('Loading logs')) {
+                terminalEl.innerHTML = '<div class="log-line info">No logs available yet. Agent may still be starting...</div>';
+            }
         }
     } catch (error) {
         console.error('Error loading agent logs:', error);
-        if (terminalEl.innerHTML.includes('Loading logs') || terminalEl.innerHTML.includes('No logs')) {
+        // Only show error if no logs exist
+        if (terminalEl.children.length === 0 || terminalEl.innerHTML.includes('Loading logs') || terminalEl.innerHTML.includes('No logs')) {
             terminalEl.innerHTML = `<div class="log-line error">Error loading logs: ${escapeHtml(error.message)}</div>`;
         }
     }
@@ -1316,7 +1580,7 @@ function populateProjectSelect(select, projects) {
     }
 }
 
-// Stats Management
+// Stats Management - Smooth updates without flashing
 function updateStats(projects, agents, running, completed) {
     console.log(`Updating stats: projects=${projects}, agents=${agents}, running=${running}, completed=${completed}`);
     
@@ -1325,41 +1589,71 @@ function updateStats(projects, agents, running, completed) {
     const runningEl = document.getElementById('stat-running');
     const completedEl = document.getElementById('stat-completed');
     
+    // Update with smooth transitions (no innerHTML, just textContent)
     if (projectsEl) {
-        projectsEl.textContent = projects !== null && projects !== undefined ? projects : '-';
-        console.log(`✅ Set stat-projects to: ${projectsEl.textContent}`);
-    } else {
-        console.error('❌ stat-projects element not found');
+        const oldValue = projectsEl.textContent;
+        const newValue = projects !== null && projects !== undefined ? String(projects) : '-';
+        if (oldValue !== newValue) {
+            // Smooth number transition
+            projectsEl.style.transform = 'scale(1.1)';
+            projectsEl.textContent = newValue;
+            setTimeout(() => {
+                projectsEl.style.transform = 'scale(1)';
+                projectsEl.style.transition = 'transform 0.2s ease';
+            }, 50);
+        }
     }
     
     if (agentsEl) {
-        agentsEl.textContent = agents !== null && agents !== undefined ? agents : '-';
-        console.log(`✅ Set stat-agents to: ${agentsEl.textContent}`);
-    } else {
-        console.error('❌ stat-agents element not found');
+        const oldValue = agentsEl.textContent;
+        const newValue = agents !== null && agents !== undefined ? String(agents) : '-';
+        if (oldValue !== newValue) {
+            agentsEl.style.transform = 'scale(1.1)';
+            agentsEl.textContent = newValue;
+            setTimeout(() => {
+                agentsEl.style.transform = 'scale(1)';
+                agentsEl.style.transition = 'transform 0.2s ease';
+            }, 50);
+        }
     }
     
     if (runningEl) {
-        runningEl.textContent = running !== null && running !== undefined ? running : '-';
-        console.log(`✅ Set stat-running to: ${runningEl.textContent}`);
-    } else {
-        console.error('❌ stat-running element not found');
+        const oldValue = runningEl.textContent;
+        const newValue = running !== null && running !== undefined ? String(running) : '-';
+        if (oldValue !== newValue) {
+            runningEl.style.transform = 'scale(1.1)';
+            runningEl.textContent = newValue;
+            setTimeout(() => {
+                runningEl.style.transform = 'scale(1)';
+                runningEl.style.transition = 'transform 0.2s ease';
+            }, 50);
+        }
     }
     
     if (completedEl) {
-        completedEl.textContent = completed !== null && completed !== undefined ? completed : '-';
-        console.log(`✅ Set stat-completed to: ${completedEl.textContent}`);
-    } else {
-        console.error('❌ stat-completed element not found');
+        const oldValue = completedEl.textContent;
+        const newValue = completed !== null && completed !== undefined ? String(completed) : '-';
+        if (oldValue !== newValue) {
+            completedEl.style.transform = 'scale(1.1)';
+            completedEl.textContent = newValue;
+            setTimeout(() => {
+                completedEl.style.transform = 'scale(1)';
+                completedEl.style.transition = 'transform 0.2s ease';
+            }, 50);
+        }
     }
 }
 
 async function refreshStats() {
+    // Stale-while-revalidate: keep old stats visible while fetching
+    const cachedStats = dataCache.stats;
+    let isRefreshing = cachedStats !== null;
+    
     try {
         console.log('📊 Refreshing stats...');
         
         // Get projects
-        const projectsRes = await fetch(`${API_BASE}/projects`);
+        const projectsRes = await fetch(`${API_BASE}/projects`, {cache: 'no-cache'});
         if (!projectsRes.ok) {
             throw new Error(`Projects API returned ${projectsRes.status}`);
         }
@@ -1393,14 +1687,25 @@ async function refreshStats() {
             completed = agents.filter(a => a.status === 'completed').length;
         }
         
+        // Cache stats
+        dataCache.stats = { projects: projects.length, agents: agents.length, running, completed };
+        dataCache.lastFetch.stats = Date.now();
+        
         console.log(`✅ Loaded ${projects.length} projects, ${agents.length} agents for current project`);
         console.log(`Stats: ${projects.length} projects, ${agents.length} agents, ${running} running, ${completed} completed`);
+        
+        // Update stats (smooth transition, no flash)
         updateStats(projects.length, agents.length, running, completed);
     } catch (error) {
         console.error('❌ Error refreshing stats:', error);
         console.error('Error details:', error.stack);
-        // Set stats to 0 on error so user knows something is wrong
-        updateStats(0, 0, 0, 0);
+        
+        // On error, keep cached stats if available, otherwise show 0
+        if (cachedStats) {
+            updateStats(cachedStats.projects, cachedStats.agents, cachedStats.running, cachedStats.completed);
+        } else {
+            updateStats(0, 0, 0, 0);
+        }
     }
 }
 

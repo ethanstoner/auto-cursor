@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  auto-cursor-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: auto-cursor-web
+    ports:
+      - "8765:8765"
+    volumes:
+      - ~/.auto-cursor:/root/.auto-cursor:ro
+      - /tmp/cursor-agents:/tmp/cursor-agents:ro
+    environment:
+      - PORT=8765
+      - HOST=0.0.0.0
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8765/api/projects"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s

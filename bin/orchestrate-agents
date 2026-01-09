@@ -135,20 +135,25 @@ check_dependencies() {
     fi
     
     for dep in $deps; do
-        local dep_status=$(get_agent_status "$dep")
-        
-        # If dependency is completed or passed QA, it's met
-        if [ "$dep_status" = "qa_passed" ] || [ "$dep_status" = "completed" ]; then
-            continue
-        fi
-        
-        # Check if dependency task is actually completed by checking tasks.json
-        # This handles cases where agent status doesn't match task completion
+        # FIRST: Check tasks.json for actual completion status (most reliable)
         local project_id=$(basename "$(dirname "$(dirname "$task_file")")")
         local tasks_file="${HOME}/.auto-cursor/projects/${project_id}/tasks.json"
+        local task_completed=false
+        local task_has_completed_timestamp=false
+        
         if [ -f "$tasks_file" ]; then
             local task_status=$(jq -r ".[] | select(.id == \"$dep\") | .status" "$tasks_file" 2>/dev/null || echo "")
+            local completed_ts=$(jq -r ".[] | select(.id == \"$dep\") | .completed" "$tasks_file" 2>/dev/null || echo "null")
+            
             if [ "$task_status" = "completed" ]; then
+                task_completed=true
+            elif [ "$completed_ts" != "null" ] && [ -n "$completed_ts" ]; then
+                # Task has completed timestamp even if status is "running" - treat as completed
+                task_completed=true
+                task_has_completed_timestamp=true
+            fi
+            
+            if [ "$task_completed" = "true" ]; then
                 # Task is completed in tasks.json - allow to proceed
                 # Check QA severity if QA failed
                 local qa_status=$(jq -r ".[] | select(.id == \"$dep\") | .qa_status" "$tasks_file" 2>/dev/null || echo "")
@@ -173,6 +178,14 @@ check_dependencies() {
                     continue
                 fi
             fi
+        fi
+        
+        # SECOND: Check agent status file (fallback)
+        local dep_status=$(get_agent_status "$dep")
+        
+        # If dependency is completed or passed QA, it's met
+        if [ "$dep_status" = "qa_passed" ] || [ "$dep_status" = "completed" ]; then
+            continue
         fi
         
         # If dependency failed, check if it's a critical failure
