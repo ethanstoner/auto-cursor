@@ -13,6 +13,12 @@
 
 </div>
 
+<div align="center">
+
+[Quick Start](#quick-start) • [Commands](#commands) • [Examples](#examples) • [Troubleshooting](#troubleshooting)
+
+</div>
+
 ---
 
 Auto-Cursor lets you describe what you want to build, and it figures out how to build it. It breaks down your goal into tasks, runs multiple AI agents in parallel to work on different parts, and automatically merges everything back together when they're done.
