@@ -1689,7 +1689,7 @@ async function loadProjectsForSidebar() {
             cache: 'no-cache'
         });
         
-        console.log(`Response status: ${response.status}, ok: ${response.ok}, headers:`, response.headers);
+        console.log(`Response status: ${response.status}, ok: ${response.ok}`);
         
         if (!response.ok) {
             const errorText = await response.text();
@@ -1698,24 +1698,36 @@ async function loadProjectsForSidebar() {
         }
         
         const projects = await response.json();
-        console.log(`✅ API returned ${projects ? projects.length : 0} projects:`, projects);
+        console.log(`✅ API returned ${projects ? projects.length : 0} projects:`, JSON.stringify(projects, null, 2));
         
-        const select = document.getElementById('sidebar-project-select');
+        // Wait for DOM to be ready
+        let select = document.getElementById('sidebar-project-select');
+        let retries = 0;
+        const maxRetries = 10;
+        
+        while (!select && retries < maxRetries) {
+            console.log(`⏳ Waiting for select element (attempt ${retries + 1}/${maxRetries})...`);
+            await new Promise(resolve => setTimeout(resolve, 100));
+            select = document.getElementById('sidebar-project-select');
+            retries++;
+        }
+        
         if (!select) {
-            console.error('❌ Project select element not found in DOM');
-            // Try again after a short delay
+            console.error('❌ Project select element not found in DOM after retries');
+            // Try one more time with a longer delay
             setTimeout(() => {
                 const retrySelect = document.getElementById('sidebar-project-select');
                 if (retrySelect) {
-                    console.log('✅ Found select element on retry');
+                    console.log('✅ Found select element on final retry');
                     populateProjectSelect(retrySelect, projects);
                 } else {
-                    console.error('❌ Still not found after retry');
+                    console.error('❌ Still not found after all retries');
                 }
-            }, 100);
+            }, 500);
             return;
         }
         
+        console.log('✅ Found select element, populating...');
         populateProjectSelect(select, projects);
         
     } catch (error) {
@@ -1726,7 +1738,12 @@ async function loadProjectsForSidebar() {
         
         const select = document.getElementById('sidebar-project-select');
         if (select) {
-            select.innerHTML = '<option value="">Error loading projects (check console)</option>';
+            const errorOption = document.createElement('option');
+            errorOption.value = '';
+            errorOption.textContent = `Error: ${error.message}`;
+            errorOption.disabled = true;
+            select.innerHTML = '';
+            select.appendChild(errorOption);
         }
     }
 }
@@ -1736,6 +1753,9 @@ function populateProjectSelect(select, projects) {
         console.error('❌ Select element is null in populateProjectSelect');
         return;
     }
+    
+    console.log(`📋 populateProjectSelect called with ${projects ? projects.length : 0} projects`);
+    console.log('Projects data:', projects);
     
     // Clear existing options
     select.innerHTML = '<option value="">Select project...</option>';
@@ -1754,6 +1774,11 @@ function populateProjectSelect(select, projects) {
         
         console.log(`✅ Populated ${projects.length} projects in selector`);
         
+        // Force a visual update
+        select.style.display = 'none';
+        select.offsetHeight; // Trigger reflow
+        select.style.display = '';
+        
         // Set current project if available
         if (currentProjectId) {
             select.value = currentProjectId;
@@ -1764,10 +1789,13 @@ function populateProjectSelect(select, projects) {
             currentProjectId = select.value;
             console.log(`   Auto-selected single project: ${currentProjectId}`);
             // Load view data for auto-selected project
-            loadViewData(currentView);
+            setTimeout(() => {
+                loadViewData(currentView);
+            }, 100);
         }
         
         console.log(`✅ Successfully loaded ${projects.length} projects into selector`);
+        console.log(`Select element now has ${select.options.length} options`);
     } else {
         // No projects found
         const option = document.createElement('option');
@@ -1776,6 +1804,7 @@ function populateProjectSelect(select, projects) {
         option.disabled = true;
         select.appendChild(option);
         console.warn('⚠️ No projects found in API response (empty array or null)');
+        console.warn('Projects value:', projects);
     }
 }
 
