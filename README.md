@@ -94,6 +94,7 @@ auto-cursor merge my-project-id all
 | **AI-Powered Merge** | Automatic conflict resolution when integrating back to main |
 | **Memory Layer** | Agents retain insights across sessions for smarter builds |
 | **Kanban Board** | Visual task management from planning through completion |
+| **Web Interface** | Browser-based UI similar to Auto-Claude's desktop interface |
 | **Interactive Planning** | Step-by-step goal refinement with AI assistance |
 | **Plan Validation** | Validate plan structure and dependencies before execution |
 | **Task Management** | Add, remove, and modify tasks in plans |
@@ -164,6 +165,8 @@ auto-cursor discard <project-id> [task-id]     # Discard worktree without mergin
 ```bash
 auto-cursor memory <project-id>                # View memory/insights
 auto-cursor clean <project-id>                 # Clean up worktrees and agents
+auto-cursor web [port]                         # Start web interface (default: 8765)
+auto-cursor serve [port]                       # Alias for 'web' command
 ```
 
 ---
