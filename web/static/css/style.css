@@ -1025,6 +1025,11 @@ h3 {
   flex-wrap: wrap;
   gap: var(--spacing-sm);
   position: relative;
+  user-select: none;
+}
+
+.agent-terminal-header:hover {
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .agent-terminal-title {
@@ -1070,6 +1075,16 @@ h3 {
   gap: var(--spacing-sm);
   font-size: 12px;
   font-family: var(--font-sans);
+}
+
+.terminal-toggle-icon {
+  width: 16px;
+  height: 16px;
+  margin-left: 8px;
+  filter: invert(1);
+  opacity: 0.6;
+  transition: transform 0.3s ease;
+  flex-shrink: 0;
 }
 
 .status-dot {
@@ -1119,6 +1134,7 @@ h3 {
   word-break: break-word;
   animation: fadeIn 0.3s ease;
   border-top: 1px solid var(--border-dark);
+  transition: max-height 0.3s ease, padding 0.3s ease;
 }
 
 .agent-terminal-output .log-line {

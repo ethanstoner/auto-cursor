@@ -1214,7 +1214,7 @@ function renderAgentTerminal(agent) {
     
     return `
         <div class="agent-terminal" data-agent-id="${escapeHtml(agent.id)}" data-status="${escapeHtml(agent.status)}">
-            <div class="agent-terminal-header">
+            <div class="agent-terminal-header" onclick="toggleTerminal('${escapeHtml(agent.id)}')" style="cursor: pointer;">
                 <div class="agent-terminal-title">
                     <h3>
                         <img src="${statusIcons[agent.status] || statusIcons.pending}" alt="${agent.status}" class="status-icon-small">
@@ -1224,9 +1224,10 @@ function renderAgentTerminal(agent) {
                 <div class="agent-status">
                     <span class="status-dot ${statusClass}"></span>
                     <span>${escapeHtml(statusLabels[agent.status] || agent.status)}</span>
+                    <img src="https://unpkg.com/lucide-static@latest/icons/chevron-down.svg" alt="Toggle" class="terminal-toggle-icon" id="toggle-icon-${escapeHtml(agent.id)}">
                 </div>
             </div>
-            <div id="terminal-${escapeHtml(agent.id)}" class="agent-terminal-output" data-agent-id="${escapeHtml(agent.id)}">
+            <div id="terminal-${escapeHtml(agent.id)}" class="agent-terminal-output" data-agent-id="${escapeHtml(agent.id)}" data-expanded="true">
                 <div class="log-line info">Loading logs...</div>
             </div>
         </div>
@@ -1245,6 +1246,35 @@ async function loadAgentLogs(agentId, logPath) {
         }
     }
 }
+
+// Toggle terminal expand/collapse
+window.toggleTerminal = function(agentId) {
+    const terminalEl = document.getElementById(`terminal-${agentId}`);
+    const toggleIcon = document.getElementById(`toggle-icon-${agentId}`);
+    if (!terminalEl) return;
+    
+    const isExpanded = terminalEl.dataset.expanded === 'true';
+    
+    if (isExpanded) {
+        terminalEl.style.maxHeight = '0';
+        terminalEl.style.overflow = 'hidden';
+        terminalEl.style.paddingTop = '0';
+        terminalEl.style.paddingBottom = '0';
+        terminalEl.dataset.expanded = 'false';
+        if (toggleIcon) {
+            toggleIcon.style.transform = 'rotate(-90deg)';
+        }
+    } else {
+        terminalEl.style.maxHeight = '500px';
+        terminalEl.style.overflow = 'auto';
+        terminalEl.style.paddingTop = '';
+        terminalEl.style.paddingBottom = '';
+        terminalEl.dataset.expanded = 'true';
+        if (toggleIcon) {
+            toggleIcon.style.transform = 'rotate(0deg)';
+        }
+    }
+};
 
 // Insights
 async function loadInsights() {
