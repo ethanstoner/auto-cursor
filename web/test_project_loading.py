@@ -87,7 +87,13 @@ async def test_project_loading():
                 return False
             
             # Check if any option has a value (not just empty default)
-            has_projects = any(await opt.get_attribute('value') for opt in options if opt != options[0])
+            has_projects = False
+            for i, opt in enumerate(options):
+                if i > 0:  # Skip first (default) option
+                    value = await opt.get_attribute('value')
+                    if value:
+                        has_projects = True
+                        break
             
             if not has_projects:
                 print("❌ No project options found (only empty default option)")
