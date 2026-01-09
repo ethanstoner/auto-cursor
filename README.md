@@ -1,6 +1,14 @@
-# Auto-Cursor
+<div align="center">
 
 <img src="logo.png" alt="Auto-Cursor Logo" width="150" height="150">
+
+# Auto-Cursor
+
+**Autonomous Multi-Agent Coding Framework**
+
+*Plan, build, and validate software with AI agents working in parallel*
+
+</div>
 
 Auto-Cursor lets you describe what you want to build, and it figures out how to build it. It breaks down your goal into tasks, runs multiple AI agents in parallel to work on different parts, and automatically merges everything back together when they're done.
 
