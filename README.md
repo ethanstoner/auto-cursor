@@ -15,26 +15,6 @@
 
 ---
 
-## Table of Contents
-
-- [What it does](#what-it-does)
-- [Features](#features)
-- [Requirements](#requirements)
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-- [Commands](#commands)
-- [How It Works](#how-it-works)
-- [Architecture](#architecture)
-- [Examples](#examples)
-- [Best Practices](#best-practices)
-- [Troubleshooting](#troubleshooting)
-- [Comparison with Auto-Claude](#comparison-with-auto-claude)
-- [Safety](#safety)
-- [Contributing](#contributing)
-- [License](#license)
-
----
-
 Auto-Cursor lets you describe what you want to build, and it figures out how to build it. It breaks down your goal into tasks, runs multiple AI agents in parallel to work on different parts, and automatically merges everything back together when they're done.
 
 ## What it does
