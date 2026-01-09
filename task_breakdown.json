@@ -1,0 +1,34 @@
+[
+  {
+    "id": "qa-severity-detection",
+    "description": "Create function to analyze QA log files and classify failures as critical (test failures, build errors) or non-critical (documentation, formatting, style issues)",
+    "dependencies": [],
+    "complexity": "medium",
+    "directory": "bin",
+    "estimated_hours": 3
+  },
+  {
+    "id": "qa-severity-storage",
+    "description": "Modify run_qa_for_agent() to call severity detection function and store QA severity (critical/non-critical) in agent state JSON file",
+    "dependencies": ["qa-severity-detection"],
+    "complexity": "simple",
+    "directory": "bin",
+    "estimated_hours": 1
+  },
+  {
+    "id": "check-dependencies-update",
+    "description": "Update check_dependencies() function to read QA severity from dependency agent state files and allow tasks to proceed if dependencies failed with non-critical QA issues, only blocking on critical failures",
+    "dependencies": ["qa-severity-storage"],
+    "complexity": "medium",
+    "directory": "bin",
+    "estimated_hours": 2
+  },
+  {
+    "id": "status-handling-update",
+    "description": "Update status handling logic to distinguish between critical and non-critical QA failures in status reporting and dependency checks throughout orchestrate-agents",
+    "dependencies": ["check-dependencies-update"],
+    "complexity": "simple",
+    "directory": "bin",
+    "estimated_hours": 1
+  }
+]
