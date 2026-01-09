@@ -1,6 +1,6 @@
 <div align="center">
 
-![Auto-Cursor Logo](logo.svg)
+![Auto-Cursor Logo](logo.png)
 
 # Auto-Cursor
 
@@ -8,7 +8,7 @@
 
 *Plan, build, and validate software with AI agents working in parallel*
 
-[![Features](#features)](#features) • [![Quick Start](#quick-start)](#quick-start) • [![Documentation](#documentation)](#documentation) • [![Examples](#examples)](#examples)
+[Features](#-key-features) • [Quick Start](#-quick-start) • [Documentation](#-documentation) • [Examples](#-examples)
 
 </div>
 
@@ -25,7 +25,7 @@ Auto-Cursor is an autonomous multi-agent coding framework that takes your high-l
 
 Think of it as having a team of AI developers working on different parts of your project simultaneously, with automatic quality checks and safe integration.
 
-### ✨ Key Features
+## ✨ Key Features
 
 | Feature | Description |
 |---------|-------------|
