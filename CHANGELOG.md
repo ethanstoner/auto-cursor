@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Memory Layer Integration** - Agents learn from past successful builds and use insights to create better plans
+  - Automatic memory saving after successful builds (≥80% completion)
+  - Memory context included in planning prompts
+  - Pattern extraction from completed tasks
+  - Project type and tech stack detection
+  - Cross-session knowledge retention
 - Interactive planning with step-by-step goal refinement
 - Complexity override for faster iteration (simple/medium/complex)
 - PAUSE file support for graceful task pausing without killing agents
