@@ -1,0 +1,192 @@
+#!/bin/bash
+# Enhanced planning system for Auto-Cursor
+# Uses structured prompts to generate better task breakdowns
+
+set -euo pipefail
+
+PLAN_PROMPT_TEMPLATE='You are an expert software architect. Break down this goal into specific, actionable coding tasks:
+
+GOAL: "{GOAL}"
+
+For each task, provide:
+1. Task ID (short, descriptive identifier like "auth-api" or "login-ui")
+2. Task description (specific, actionable description)
+3. Dependencies (array of task IDs this depends on, empty if none)
+4. Complexity (simple/medium/complex)
+5. Directory (relative path where work should happen)
+6. Estimated time (in hours, rough estimate)
+
+Output ONLY valid JSON array, no markdown, no explanations:
+[
+  {
+    "id": "task-1",
+    "description": "Create authentication API endpoints with JWT",
+    "dependencies": [],
+    "complexity": "medium",
+    "directory": "backend/api/auth",
+    "estimated_hours": 4
+  },
+  {
+    "id": "task-2",
+    "description": "Create login UI component with form validation",
+    "dependencies": ["task-1"],
+    "complexity": "simple",
+    "directory": "frontend/components/auth",
+    "estimated_hours": 2
+  }
+]'
+
+generate_plan() {
+    local goal="$1"
+    local project_path="${2:-.}"
+    local complexity_override="${3:-}"
+    
+    # Check project structure to inform planning
+    local has_backend=false
+    local has_frontend=false
+    local has_api=false
+    
+    [ -d "$project_path/backend" ] && has_backend=true
+    [ -d "$project_path/frontend" ] && has_frontend=true
+    [ -d "$project_path/api" ] && has_api=true
+    
+    local context=""
+    if [ "$has_backend" = "true" ]; then
+        context="${context}Project has a backend directory. "
+    fi
+    if [ "$has_frontend" = "true" ]; then
+        context="${context}Project has a frontend directory. "
+    fi
+    if [ "$has_api" = "true" ]; then
+        context="${context}Project has an api directory. "
+    fi
+    
+    # Escape special characters in goal for sed
+    local escaped_goal=$(echo "$goal" | sed 's/[[\.*^$()+?{|]/\\&/g')
+    local prompt=$(echo "$PLAN_PROMPT_TEMPLATE" | sed "s/{GOAL}/$escaped_goal/")
+    if [ -n "$context" ]; then
+        prompt="${prompt}\n\nContext: ${context}"
+    fi
+    
+    # Add complexity override if provided
+    if [ -n "$complexity_override" ]; then
+        prompt="${prompt}\n\nIMPORTANT: Force all tasks to have complexity: ${complexity_override}"
+        prompt="${prompt}\nDo not assess complexity - use ${complexity_override} for all tasks."
+    fi
+    
+    # Try to get plan from cursor-agent
+    local temp_output=$(mktemp)
+    (
+        cd "$project_path"
+        cursor-agent --print --output-format json "$prompt" > "$temp_output" 2>&1 || true
+    )
+    
+    # Enhanced JSON extraction - try multiple methods
+    local json_output=""
+    
+    # Method 1: Handle cursor-agent JSON wrapper format
+    # cursor-agent returns: {"type":"result","result":"[{\"id\":...}]"}
+    # Need to extract the "result" field and parse it as JSON
+    if [ -s "$temp_output" ]; then
+        # Try to parse as JSON object with "result" field
+        local result_field=$(cat "$temp_output" | jq -r '.result // empty' 2>/dev/null || echo "")
+        if [ -n "$result_field" ] && [ "$result_field" != "null" ] && [ "$result_field" != "" ]; then
+            # The result field contains text that may include JSON
+            # First, try to extract JSON array from the result text
+            local extracted_json=$(echo "$result_field" | grep -oE '\[[\s\S]*\]' | head -1 || echo "")
+            
+            # If found JSON array in result, use it
+            if [ -n "$extracted_json" ]; then
+                json_output="$extracted_json"
+            else
+                # If result contains markdown code blocks, extract JSON from them
+                if echo "$result_field" | grep -q '```json'; then
+                    json_output=$(echo "$result_field" | sed -n '/```json/,/```/p' | sed '/```/d' | jq -r '.' 2>/dev/null || echo "")
+                elif echo "$result_field" | grep -q '```'; then
+                    json_output=$(echo "$result_field" | sed -n '/```/,/```/p' | sed '/```/d' | jq -r '.' 2>/dev/null || echo "")
+                else
+                    # Try parsing the entire result field as JSON
+                    json_output=$(echo "$result_field" | jq -r '.' 2>/dev/null || echo "")
+                fi
+            fi
+        fi
+    fi
+    
+    # Method 2: Extract JSON array directly from output (if not wrapped)
+    if [ -z "$json_output" ] || [ "$json_output" = "[]" ] || [ "$json_output" = "null" ]; then
+        json_output=$(cat "$temp_output" | grep -oE '\[[\s\S]*\]' | head -1 || echo "")
+    fi
+    
+    # Method 3: Try to find JSON between code blocks in result field
+    if [ -z "$json_output" ] || [ "$json_output" = "[]" ] || [ "$json_output" = "null" ]; then
+        if [ -n "$result_field" ] && [ "$result_field" != "null" ] && [ "$result_field" != "" ]; then
+            if echo "$result_field" | grep -q '```json'; then
+                local code_json=$(echo "$result_field" | sed -n '/```json/,/```/p' | sed '/```/d' | jq -r '.' 2>/dev/null || echo "")
+                if [ -n "$code_json" ] && echo "$code_json" | jq 'type == "array"' >/dev/null 2>&1; then
+                    json_output="$code_json"
+                fi
+            elif echo "$result_field" | grep -q '```'; then
+                local code_json=$(echo "$result_field" | sed -n '/```/,/```/p' | sed '/```/d' | jq -r '.' 2>/dev/null || echo "")
+                if [ -n "$code_json" ] && echo "$code_json" | jq 'type == "array"' >/dev/null 2>&1; then
+                    json_output="$code_json"
+                fi
+            fi
+        fi
+    fi
+    
+    # Method 4: Try to find JSON between ``` markers in full output
+    if [ -z "$json_output" ] || [ "$json_output" = "[]" ] || [ "$json_output" = "null" ]; then
+        json_output=$(cat "$temp_output" | sed -n '/```json/,/```/p' | sed '/```/d' | jq -r '.' 2>/dev/null || echo "")
+        if [ -z "$json_output" ] || ! echo "$json_output" | jq 'type == "array"' >/dev/null 2>&1; then
+            json_output=$(cat "$temp_output" | sed -n '/```/,/```/p' | sed '/```/d' | jq -r '.' 2>/dev/null || echo "")
+        fi
+    fi
+    
+    # Method 5: Try parsing entire output as JSON array directly
+    if [ -z "$json_output" ] || [ "$json_output" = "[]" ] || [ "$json_output" = "null" ]; then
+        if cat "$temp_output" | jq 'type == "array"' >/dev/null 2>&1; then
+            json_output=$(cat "$temp_output" | jq -r '.' 2>/dev/null || echo "")
+        fi
+    fi
+    
+    # Method 6: Try to extract just the array part with awk
+    if [ -z "$json_output" ] || [ "$json_output" = "[]" ] || [ "$json_output" = "null" ]; then
+        json_output=$(cat "$temp_output" | awk '/\[/,/\]/' | jq -r '.' 2>/dev/null || echo "")
+    fi
+    
+    # Validate JSON structure - must be an array
+    if [ -n "$json_output" ] && [ "$json_output" != "[]" ] && [ "$json_output" != "null" ]; then
+        if ! echo "$json_output" | jq 'type == "array"' >/dev/null 2>&1; then
+            json_output=""
+        fi
+    fi
+    
+    # If still no valid JSON, create a fallback plan
+    if [ -z "$json_output" ] || [ "$json_output" = "[]" ] || ! echo "$json_output" | jq . >/dev/null 2>&1; then
+        json_output=$(cat << EOF
+[
+  {
+    "id": "main-task",
+    "description": "$goal",
+    "dependencies": [],
+    "complexity": "medium",
+    "directory": ".",
+    "estimated_hours": 4
+  }
+]
+EOF
+)
+    fi
+    
+    rm -f "$temp_output"
+    echo "$json_output"
+}
+
+# If run directly
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+    if [ $# -lt 1 ]; then
+        echo "Usage: $0 <goal> [project-path] [complexity-override]"
+        exit 1
+    fi
+    generate_plan "$1" "${2:-.}" "${3:-}"
+fi

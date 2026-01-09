@@ -8,10 +8,10 @@ git clone https://github.com/ethanstoner/auto-cursor.git
 cd auto-cursor
 
 # Make scripts executable
-chmod +x scripts/*.sh
+chmod +x bin/*
 
 # Add to PATH (add to ~/.bashrc or ~/.zshrc)
-export PATH="$PATH:$(pwd)/scripts"
+export PATH="$PATH:$(pwd)/bin"
 ```
 
 ## System Requirements
@@ -30,7 +30,7 @@ export PATH="$PATH:$(pwd)/scripts"
 
 ```bash
 # Check if scripts are executable
-ls -la scripts/
+ls -la bin/
 
 # Test auto-cursor
 auto-cursor --help
@@ -50,7 +50,7 @@ If `auto-cursor` command is not found:
 
 ```bash
 # Add to PATH permanently
-echo 'export PATH="$PATH:/path/to/auto-cursor/scripts"' >> ~/.bashrc
+echo 'export PATH="$PATH:/path/to/auto-cursor/bin"' >> ~/.bashrc
 source ~/.bashrc
 ```
 
@@ -58,7 +58,7 @@ source ~/.bashrc
 
 ```bash
 # Make scripts executable
-chmod +x scripts/*.sh
+chmod +x bin/*
 ```
 
 ### jq not found

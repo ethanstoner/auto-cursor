@@ -41,9 +41,18 @@ Each task runs in its own git worktree, so your main branch stays safe. Agents c
 | Feature | Benefit |
 |--------|---------|
 | **Autonomous Planning** | AI analyzes your goal and creates a detailed task breakdown with dependencies |
+| **Interactive Planning** | Step-by-step goal refinement with AI assistance |
+| **Complexity Override** | Force specific complexity levels for faster iteration |
 | **Parallel Execution** | Multiple agents work simultaneously on different tasks, respecting dependencies |
 | **Isolated Worktrees** | Each task gets its own git worktree - your main branch stays untouched |
+| **PAUSE File Support** | Pause agents gracefully without killing them |
+| **HUMAN_INPUT.md** | Inject instructions mid-execution for course correction |
+| **Plan Validation** | Validate plan structure, dependencies, and catch errors early |
+| **Plan Review & Editing** | Review and modify plans before execution |
+| **Task Management** | Add, remove, and modify tasks in plans |
+| **Task Control** | Pause or cancel individual tasks |
 | **Automatic QA** | Quality assurance runs automatically when tasks complete |
+| **Enhanced Progress** | Detailed progress tracking with time estimates and progress bars |
 | **AI-Powered Merge** | Automatic conflict resolution when integrating back to main |
 | **Memory Layer** | Agents retain insights across sessions for smarter builds |
 | **Kanban Board** | Visual task management from planning through completion |
@@ -64,14 +73,27 @@ Each task runs in its own git worktree, so your main branch stays safe. Agents c
 
 ## Installation
 
-The scripts need to be installed in `~/.local/bin/` and available in your PATH. You'll need:
+Clone the repository and add the `bin/` directory to your PATH:
 
+```bash
+# Clone the repository
+git clone https://github.com/ethanstoner/auto-cursor.git
+cd auto-cursor
+
+# Make scripts executable
+chmod +x bin/*
+
+# Add to PATH (add to ~/.bashrc or ~/.zshrc)
+export PATH="$PATH:$(pwd)/bin"
+```
+
+The repository includes:
 - `auto-cursor` - Main CLI tool
 - `auto-cursor-planner` - Task planning
 - `auto-cursor-merge` - Merge conflict resolution
 - `orchestrate-agents` - Multi-agent orchestration
 
-Make sure these are executable and in your PATH:
+Verify installation:
 
 ```bash
 # Check if scripts are available
@@ -79,9 +101,6 @@ which auto-cursor
 which auto-cursor-planner
 which auto-cursor-merge
 which orchestrate-agents
-
-# If not in PATH, add to ~/.bashrc or ~/.zshrc
-export PATH="$PATH:$HOME/.local/bin"
 ```
 
 ---
@@ -124,17 +143,38 @@ auto-cursor list                               # List all projects
 
 ```bash
 auto-cursor plan <project-id> <goal>          # Create a plan
+  --interactive                                # Interactive goal refinement
+  --complexity <level>                         # Override complexity (simple/medium/complex)
 auto-cursor start <project-id> [--skip-qa]   # Start execution
 auto-cursor continue <project-id>              # Continue if interrupted
+```
+
+### Planning & Validation
+
+```bash
+auto-cursor validate <project-id>              # Validate plan structure
+auto-cursor plan-review <project-id>           # Review generated plan
+auto-cursor plan-edit <project-id>             # Edit plan interactively
+auto-cursor task-add <project-id> <desc>       # Add custom task
+auto-cursor task-remove <project-id> <id>      # Remove task
+auto-cursor task-modify <project-id> <id>      # Modify task
 ```
 
 ### Monitoring
 
 ```bash
 auto-cursor status <project-id>                # Show kanban board
+auto-cursor status <project-id> --detailed    # Enhanced progress with time estimates
 auto-cursor board <project-id>                 # Interactive board (auto-refresh)
 auto-cursor tasks <project-id>                 # List all tasks
 auto-cursor logs <project-id> [task-id]        # View logs
+```
+
+### Task Control
+
+```bash
+auto-cursor pause <project-id> <task-id>       # Pause specific task (creates PAUSE file)
+auto-cursor cancel <project-id> <task-id>      # Cancel specific task
 ```
 
 ### Review & Integration
@@ -400,6 +440,15 @@ This is inspired by [Auto-Claude](https://github.com/AndyMik90/Auto-Claude) but 
 | Feature | Auto-Claude | Auto-Cursor |
 |---------|------------|-------------|
 | Autonomous Planning | ✅ | ✅ |
+| Interactive Planning | ✅ | ✅ |
+| Complexity Override | ✅ | ✅ |
+| PAUSE File | ✅ | ✅ |
+| HUMAN_INPUT.md | ✅ | ✅ |
+| Plan Validation | ✅ | ✅ |
+| Plan Review/Edit | ✅ | ✅ |
+| Task Management | ✅ | ✅ |
+| Task Pause/Cancel | ✅ | ✅ |
+| Enhanced Progress | ✅ | ✅ |
 | Multi-Agent Orchestration | ✅ | ✅ |
 | Isolated Git Worktrees | ✅ | ✅ |
 | Self-Validating QA | ✅ | ✅ |
@@ -415,6 +464,9 @@ Auto-Cursor includes several improvements:
 - **Automatic background monitoring** - QA runs without manual steps
 - **Real-time status updates** - Tasks.json updates automatically
 - **Project-aware planning** - Detects project structure and adapts
+- **PAUSE file support** - Graceful pause without killing agents
+- **HUMAN_INPUT.md** - Inject instructions mid-execution
+- **Enhanced progress tracking** - Time estimates, progress bars, ETA
 
 ---
 

@@ -1,0 +1,127 @@
+#!/bin/bash
+# Merge worktrees back to main branch
+# Handles conflicts with AI-powered resolution
+
+set -euo pipefail
+
+merge_worktree() {
+    local project_id="$1"
+    local task_id="${2:-all}"
+    local project_dir="${HOME}/.auto-cursor/projects/${project_id}"
+    local worktrees_dir="${HOME}/.auto-cursor/worktrees"
+    
+    if [ ! -d "$project_dir" ]; then
+        echo "Error: Project not found: $project_id" >&2
+        exit 1
+    fi
+    
+    local project_path=$(jq -r '.path' "${project_dir}/config.json")
+    
+    if [ "$task_id" = "all" ]; then
+        # Merge all completed tasks
+        local tasks=$(cat "${project_dir}/tasks.json")
+        local completed_tasks=$(echo "$tasks" | jq -r '.[] | select(.status == "completed" or .status == "qa_passed") | .id')
+        
+        for task in $completed_tasks; do
+            merge_single_worktree "$project_id" "$task" "$project_path" "$worktrees_dir"
+        done
+    else
+        merge_single_worktree "$project_id" "$task_id" "$project_path" "$worktrees_dir"
+    fi
+}
+
+merge_single_worktree() {
+    local project_id="$1"
+    local task_id="$2"
+    local project_path="$3"
+    local worktrees_dir="$4"
+    
+    local worktree_name="auto-cursor-${project_id}-${task_id}"
+    local worktree_path="${worktrees_dir}/${worktree_name}"
+    
+    if [ ! -d "$worktree_path" ]; then
+        echo "Warning: Worktree not found for $task_id, skipping..."
+        return
+    fi
+    
+    echo "Merging worktree: $task_id"
+    
+    (
+        cd "$project_path"
+        
+        # Check if branch exists
+        if git show-ref --verify --quiet "refs/heads/auto-cursor/${task_id}"; then
+            # Try to merge
+            if git merge "auto-cursor/${task_id}" --no-edit 2>&1; then
+                echo "✅ Successfully merged $task_id"
+                
+                # Clean up worktree
+                git worktree remove "$worktree_path" 2>/dev/null || rm -rf "$worktree_path"
+            else
+                echo "⚠️  Merge conflicts detected for $task_id"
+                echo "Resolving with AI..."
+                
+                # Use cursor-agent to resolve conflicts
+                resolve_conflicts "$project_path" "$task_id"
+            fi
+        else
+            echo "⚠️  Branch auto-cursor/${task_id} not found, copying changes manually..."
+            cp -r "$worktree_path"/* "$project_path"/ 2>/dev/null || true
+            rm -rf "$worktree_path"
+        fi
+    )
+}
+
+resolve_conflicts() {
+    local project_path="$1"
+    local task_id="$2"
+    
+    local conflict_files=$(cd "$project_path" && git diff --name-only --diff-filter=U 2>/dev/null || echo "")
+    
+    if [ -z "$conflict_files" ]; then
+        return
+    fi
+    
+    echo "Resolving conflicts in: $conflict_files"
+    
+    for file in $conflict_files; do
+        if [ -f "$project_path/$file" ]; then
+            local conflict_content=$(cd "$project_path" && git show :3:"$file" 2>/dev/null || cat "$file")
+            local our_content=$(cd "$project_path" && git show :2:"$file" 2>/dev/null || echo "")
+            local their_content=$(cd "$project_path" && git show :3:"$file" 2>/dev/null || echo "")
+            
+            local resolve_prompt="Resolve this git merge conflict in $file. Keep the best parts of both versions, ensuring the code works correctly.
+
+OUR VERSION (current branch):
+\`\`\`
+$our_content
+\`\`\`
+
+THEIR VERSION (incoming changes):
+\`\`\`
+$their_content
+\`\`\`
+
+Provide the resolved version with all conflict markers removed:"
+            
+            local resolved=$(cd "$project_path" && cursor-agent --print "$resolve_prompt" 2>&1 | grep -v "^Warning:" | tail -n +2)
+            
+            if [ -n "$resolved" ]; then
+                echo "$resolved" > "$project_path/$file"
+                (cd "$project_path" && git add "$file")
+            fi
+        fi
+    done
+    
+    # Complete merge
+    (cd "$project_path" && git commit --no-edit 2>/dev/null || true)
+    echo "✅ Conflicts resolved for $task_id"
+}
+
+# Main
+if [ $# -lt 1 ]; then
+    echo "Usage: $0 <project-id> [task-id|all]"
+    exit 1
+fi
+
+merge_worktree "$1" "${2:-all}"

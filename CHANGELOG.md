@@ -8,18 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Initial release of Auto-Cursor
-- Autonomous task planning with AI
-- Multi-agent orchestration
-- Isolated git worktrees for safe parallel development
-- Automatic QA validation
-- AI-powered merge conflict resolution
-- Kanban board for task tracking
-- Memory layer for cross-session insights
-- Project-aware planning
+- Interactive planning with step-by-step goal refinement
+- Complexity override for faster iteration (simple/medium/complex)
+- PAUSE file support for graceful task pausing without killing agents
+- HUMAN_INPUT.md support for injecting instructions mid-execution
+- Plan validation to catch errors early
+- Plan review and editing capabilities
+- Task management (add, remove, modify tasks)
+- Task control (pause or cancel individual tasks)
+- Enhanced progress tracking with time estimates and progress bars
+- Detailed status view with `--detailed` flag
 
 ### Changed
-- N/A
+- Improved planning workflow with interactive mode
+- Enhanced monitoring with better progress visualization
 
 ### Fixed
 - N/A

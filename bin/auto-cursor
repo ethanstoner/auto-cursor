@@ -1,0 +1,1608 @@
+#!/bin/bash
+# Auto-Cursor: Autonomous multi-agent coding framework
+# Similar to Auto-Claude but using Cursor CLI agents
+# Plans, builds, and validates software autonomously
+
+set -euo pipefail
+
+# Configuration
+AUTO_CURSOR_DIR="${AUTO_CURSOR_DIR:-$HOME/.auto-cursor}"
+PROJECTS_DIR="${AUTO_CURSOR_DIR}/projects"
+MEMORY_DIR="${AUTO_CURSOR_DIR}/memory"
+WORKTREES_DIR="${AUTO_CURSOR_DIR}/worktrees"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+MAGENTA='\033[0;35m'
+NC='\033[0m'
+
+# Create directories
+mkdir -p "$AUTO_CURSOR_DIR" "$PROJECTS_DIR" "$MEMORY_DIR" "$WORKTREES_DIR"
+
+usage() {
+    cat << EOF
+Auto-Cursor: Autonomous Multi-Agent Coding Framework
+
+Usage: auto-cursor <command> [options]
+
+Commands:
+  init <project-path>          Initialize a new project
+  plan <project-id> <goal>     Create a plan for a goal
+    --interactive              Interactive goal refinement
+    --complexity <level>       Override complexity (simple/medium/complex)
+  start <project-id>           Start executing the current plan
+    --skip-qa                  Skip automatic QA validation
+    --max-iterations <n>       Limit iterations (placeholder)
+  status <project-id>          Show kanban board status
+    --detailed                 Show detailed progress with time estimates
+  board <project-id>           Interactive kanban board
+  tasks <project-id>           List all tasks with details
+  validate <project-id>        Validate plan structure and dependencies
+    --auto-fix                 Auto-fix common issues
+  plan-review <project-id>    Review generated plan
+  plan-edit <project-id>       Edit plan interactively
+  task-add <project-id> <desc> Add custom task to plan
+  task-remove <project-id> <id> Remove task from plan
+  task-modify <project-id> <id> Modify task in plan
+  pause <project-id> <task-id> Pause specific task
+  cancel <project-id> <task-id> Cancel specific task
+  agent <project-id> <task-id> Show agent working on task
+  logs <project-id> [task-id]  View agent logs (use 'all' for all tasks)
+  retry <project-id> [task-id] Retry failed task (use 'all' for all failed)
+  diff <project-id> <task-id>  Show diff before merge
+  merge <project-id> [task-id] Merge worktree back to main (use 'all' for all tasks)
+  review <project-id> [task-id] Review changes in worktree (use 'all' for all)
+  discard <project-id> [task-id] Discard worktree without merging
+  continue <project-id>        Continue interrupted execution
+  memory <project-id>          View memory/insights
+  list                         List all projects
+  clean <project-id>           Clean up worktrees and agents (only project agents)
+
+Examples:
+  # Initialize a project
+  auto-cursor init ~/my-project
+
+  # Plan a feature (interactive)
+  auto-cursor plan my-project --interactive
+
+  # Plan with complexity override
+  auto-cursor plan my-project "Fix button color" --complexity simple
+
+  # Validate plan before starting
+  auto-cursor validate my-project
+
+  # Review and edit plan
+  auto-cursor plan-review my-project
+  auto-cursor plan-edit my-project
+
+  # Start execution
+  auto-cursor start my-project
+
+  # View detailed status
+  auto-cursor status my-project --detailed
+EOF
+}
+
+# Project management
+init_project() {
+    local project_path="$1"
+    local project_id="${2:-$(basename "$project_path")}"
+    
+    if [ ! -d "$project_path" ]; then
+        echo -e "${RED}Error: Project path does not exist: $project_path${NC}" >&2
+        exit 1
+    fi
+    
+    # Check if it's a git repo
+    if [ ! -d "$project_path/.git" ]; then
+        echo -e "${YELLOW}Initializing git repository...${NC}"
+        (cd "$project_path" && git init)
+    fi
+    
+    local project_dir="${PROJECTS_DIR}/${project_id}"
+    mkdir -p "$project_dir"
+    
+    # Create project config
+    cat > "${project_dir}/config.json" << EOF
+{
+  "id": "$project_id",
+  "path": "$project_path",
+  "created": "$(date -Iseconds)",
+  "status": "active"
+}
+EOF
+    
+    # Initialize plan
+    echo "[]" > "${project_dir}/plan.json"
+    echo "[]" > "${project_dir}/tasks.json"
+    echo "{}" > "${project_dir}/memory.json"
+    
+    echo -e "${GREEN}Project initialized: $project_id${NC}"
+    echo "  Path: $project_path"
+    echo "  Config: ${project_dir}/config.json"
+}
+
+# Task planning
+plan_goal() {
+    local project_id="$1"
+    shift
+    
+    # Parse flags
+    local goal=""
+    local complexity=""
+    local interactive=false
+    
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --complexity)
+                complexity="$2"
+                shift 2
+                ;;
+            --interactive)
+                interactive=true
+                shift
+                ;;
+            *)
+                if [ -z "$goal" ]; then
+                    goal="$1"
+                else
+                    goal="$goal $1"
+                fi
+                shift
+                ;;
+        esac
+    done
+    
+    if [ -z "$goal" ] && [ "$interactive" = "false" ]; then
+        echo -e "${RED}Error: Goal required (or use --interactive)${NC}" >&2
+        exit 1
+    fi
+    
+    local project_dir="${PROJECTS_DIR}/${project_id}"
+    if [ ! -d "$project_dir" ]; then
+        echo -e "${RED}Error: Project not found: $project_id${NC}" >&2
+        exit 1
+    fi
+    
+    local project_path=$(jq -r '.path' "${project_dir}/config.json")
+    
+    # Interactive mode
+    if [ "$interactive" = "true" ]; then
+        plan_goal_interactive "$project_id" "$project_path" "$complexity"
+        return
+    fi
+    
+    echo -e "${CYAN}Planning goal: $goal${NC}"
+    if [ -n "$complexity" ]; then
+        echo -e "${YELLOW}Complexity override: $complexity${NC}"
+    fi
+    echo ""
+    
+    # Use enhanced planner with complexity override
+    echo -e "${BLUE}Generating plan with AI...${NC}"
+    local plan_json=$(auto-cursor-planner "$goal" "$project_path" "$complexity")
+    
+    # Save plan
+    echo "$plan_json" | jq '.' > "${project_dir}/plan.json"
+    
+    # Save plan output for debugging
+    echo "$plan_json" | jq '.' > "${project_dir}/plan-output.json"
+    
+    # Convert plan to tasks with status
+    local tasks_json=$(echo "$plan_json" | jq 'map(. + {
+      "status": "pending",
+      "agent_id": null,
+      "worktree": null,
+      "created": now,
+      "started": null,
+      "completed": null,
+      "qa_status": null
+    })')
+    
+    echo "$tasks_json" | jq '.' > "${project_dir}/tasks.json"
+    
+    local task_count=$(echo "$tasks_json" | jq 'length' 2>/dev/null || echo "0")
+    if [ -z "$task_count" ] || [ "$task_count" = "null" ]; then
+        task_count="0"
+    fi
+    echo -e "${GREEN}Plan created with $task_count tasks${NC}"
+    echo ""
+    
+    # Validate plan
+    local validation_errors=$(echo "$tasks_json" | jq -r '
+        . as $tasks |
+        [
+            (if (map(.id) | unique | length) != length then "Duplicate task IDs found" else empty end),
+            (if (map(.id) | map(select(. == null or . == ""))) | length > 0 then "Missing task IDs" else empty end),
+            (if (map(.description) | map(select(. == null or . == ""))) | length > 0 then "Missing descriptions" else empty end)
+        ] | .[] | select(. != null)
+    ' 2>/dev/null || echo "")
+    
+    if [ -n "$validation_errors" ]; then
+        echo -e "${YELLOW}Validation warnings:${NC}"
+        echo "$validation_errors" | while read -r error; do
+            [ -n "$error" ] && echo "  ⚠️  $error"
+        done
+        echo ""
+    fi
+    
+    echo "$tasks_json" | jq -r '.[] | "  - \(.id): \(.description)"'
+    
+    # Show progress estimate
+    local total_hours=$(echo "$tasks_json" | jq '[.[] | .estimated_hours // 0] | add' 2>/dev/null || echo "0")
+    if [ "$total_hours" != "0" ] && [ -n "$total_hours" ] && [ "$total_hours" != "null" ]; then
+        echo ""
+        echo -e "${CYAN}Estimated total time: ${total_hours} hours${NC}"
+    fi
+}
+
+# Interactive planning mode
+plan_goal_interactive() {
+    local project_id="$1"
+    local project_path="$2"
+    local complexity_override="${3:-}"
+    
+    echo -e "${CYAN}=== Interactive Planning Mode ===${NC}"
+    echo ""
+    echo "Let's refine your goal step by step."
+    echo ""
+    
+    # Step 1: Get initial goal
+    echo -e "${BLUE}Step 1: What do you want to build?${NC}"
+    read -p "Goal: " goal
+    
+    if [ -z "$goal" ]; then
+        echo -e "${RED}Error: Goal cannot be empty${NC}" >&2
+        exit 1
+    fi
+    
+    # Step 2: Refine goal with AI
+    echo ""
+    echo -e "${BLUE}Step 2: Refining goal with AI...${NC}"
+    local refinement_prompt="The user wants to: $goal
+
+Please help refine this goal by:
+1. Asking clarifying questions
+2. Identifying potential ambiguities
+3. Suggesting improvements
+
+Respond with:
+- Refined goal (if improvements found)
+- OR confirmation that the goal is clear
+- Any questions or concerns"
+    
+    local temp_refine=$(mktemp)
+    (
+        cd "$project_path"
+        cursor-agent --print "$refinement_prompt" > "$temp_refine" 2>&1 || true
+    )
+    
+    local refined_output=$(cat "$temp_refine" | grep -v "^\[" | head -20)
+    echo ""
+    echo -e "${GREEN}AI Refinement:${NC}"
+    echo "$refined_output"
+    echo ""
+    
+    # Step 3: Confirm or edit
+    read -p "Use this refined goal? (y/n/edit): " confirm
+    case "$confirm" in
+        edit|e)
+            echo ""
+            read -p "Enter your refined goal: " goal
+            ;;
+        n|no)
+            echo -e "${YELLOW}Cancelled${NC}"
+            exit 0
+            ;;
+        *)
+            # Use original goal
+            ;;
+    esac
+    
+    # Step 4: Complexity (if not overridden)
+    if [ -z "$complexity_override" ]; then
+        echo ""
+        echo -e "${BLUE}Step 3: Complexity Level${NC}"
+        echo "  simple   - 1-2 files, single service, no integrations"
+        echo "  medium   - 3-10 files, 1-2 services, minimal integrations"
+        echo "  complex  - 10+ files, multiple services, external integrations"
+        echo ""
+        read -p "Complexity (simple/medium/complex/auto): " complexity_override
+        if [ "$complexity_override" = "auto" ] || [ -z "$complexity_override" ]; then
+            complexity_override=""
+        fi
+    fi
+    
+    # Step 5: Generate plan
+    echo ""
+    echo -e "${BLUE}Step 4: Generating plan...${NC}"
+    rm -f "$temp_refine"
+    
+    # Call regular plan_goal with the refined goal
+    plan_goal "$project_id" "$goal" ${complexity_override:+--complexity "$complexity_override"}
+}
+
+# Start execution
+start_execution() {
+    local project_id="$1"
+    local max_iterations="${2:-}"
+    local skip_qa="${3:-false}"
+    local project_dir="${PROJECTS_DIR}/${project_id}"
+    
+    if [ ! -d "$project_dir" ]; then
+        echo -e "${RED}Error: Project not found: $project_id${NC}" >&2
+        exit 1
+    fi
+    
+    local project_path=$(jq -r '.path' "${project_dir}/config.json")
+    local tasks_file="${project_dir}/tasks.json"
+    
+    # Load tasks
+    local tasks=$(cat "$tasks_file")
+    local pending_tasks=$(echo "$tasks" | jq '[.[] | select(.status == "pending")]')
+    
+    if [ "$(echo "$pending_tasks" | jq 'length')" -eq 0 ]; then
+        echo -e "${YELLOW}No pending tasks to execute${NC}"
+        return
+    fi
+    
+    echo -e "${CYAN}Starting execution...${NC}"
+    echo ""
+    
+    # Create orchestration config
+    local orchestration_file="${project_dir}/orchestration.json"
+    local agents_array="[]"
+    
+    # Convert tasks to agents
+    local task_count=$(echo "$tasks" | jq 'length')
+    for i in $(seq 0 $((task_count - 1))); do
+        local task=$(echo "$tasks" | jq ".[$i]")
+        local task_id=$(echo "$task" | jq -r '.id')
+        local task_desc=$(echo "$task" | jq -r '.description')
+        local task_dir=$(echo "$task" | jq -r '.directory')
+        local deps=$(echo "$task" | jq -r '.dependencies[]? // empty' | tr '\n' ',' | sed 's/,$//')
+        
+        # Create worktree for this task
+        local worktree_name="auto-cursor-${project_id}-${task_id}"
+        local worktree_path="${WORKTREES_DIR}/${worktree_name}"
+        
+        # Create worktree if it doesn't exist
+        if [ ! -d "$worktree_path" ]; then
+            echo -e "${BLUE}Creating worktree for $task_id...${NC}"
+            (
+                cd "$project_path"
+                git worktree add "$worktree_path" -b "auto-cursor/${task_id}" 2>/dev/null || {
+                    # If worktree add fails, just create directory
+                    mkdir -p "$worktree_path"
+                    cp -r "$project_path"/* "$worktree_path"/ 2>/dev/null || true
+                }
+            )
+        fi
+        
+        # Build dependencies array
+        local deps_array="[]"
+        if [ -n "$deps" ]; then
+            deps_array=$(echo "$deps" | tr ',' '\n' | jq -R . | jq -s .)
+        fi
+        
+        # Add agent to orchestration
+        local agent_obj=$(cat << EOF
+{
+  "id": "$task_id",
+  "directory": "$worktree_path",
+  "initial_prompt": "$task_desc. Work in the $task_dir directory. Follow the project's coding standards and best practices.",
+  "model": "auto",
+  "dependencies": $deps_array,
+  "run_qa": true,
+  "qa_required": true
+}
+EOF
+)
+        agents_array=$(echo "$agents_array" | jq ". + [$agent_obj]")
+    done
+    
+    # Create orchestration config
+    cat > "$orchestration_file" << EOF
+{
+  "agents": $agents_array,
+  "coordination": {
+    "shared_vars": [],
+    "qa_on_completion": true
+  }
+}
+EOF
+    
+    # Update task statuses
+    local updated_tasks=$(echo "$tasks" | jq 'map(.status = "running" | .started = now)')
+    echo "$updated_tasks" | jq '.' > "$tasks_file"
+    
+    # Store project metadata for cleanup tracking
+    echo "$project_id" > "${project_dir}/.project-id"
+    echo "$(date -Iseconds)" > "${project_dir}/.last-started"
+    
+    # Start orchestration with automatic monitoring
+    echo -e "${GREEN}Starting agents with orchestration...${NC}"
+    if [ "$skip_qa" = "true" ]; then
+        # Temporarily disable QA in orchestration
+        local temp_orch=$(mktemp)
+        jq '.coordination.qa_on_completion = false | .agents[].run_qa = false' "$orchestration_file" > "$temp_orch"
+        orchestrate-agents start "$temp_orch"
+        rm -f "$temp_orch"
+    else
+        orchestrate-agents start "$orchestration_file"
+        
+        # Start automatic monitoring in background to run QA on completion
+        # Use nohup and redirect to log file so it persists
+        local monitor_log="${project_dir}/monitor.log"
+        (
+            nohup orchestrate-agents monitor "$orchestration_file" > "$monitor_log" 2>&1
+        ) &
+        local monitor_pid=$!
+        echo "$monitor_pid" > "${project_dir}/.monitor-pid"
+        echo -e "${BLUE}Started automatic QA monitor (PID: $monitor_pid)${NC}"
+    fi
+    
+    echo ""
+    echo -e "${CYAN}Agents started with automatic QA monitoring${NC}"
+    echo -e "${CYAN}Use 'auto-cursor status $project_id' to monitor progress${NC}"
+    echo -e "${CYAN}Use 'auto-cursor board $project_id' for interactive view${NC}"
+}
+
+# Status display
+show_status() {
+    local project_id="$1"
+    local project_dir="${PROJECTS_DIR}/${project_id}"
+    
+    if [ ! -d "$project_dir" ]; then
+        echo -e "${RED}Error: Project not found: $project_id${NC}" >&2
+        exit 1
+    fi
+    
+    local tasks_file="${project_dir}/tasks.json"
+    local orchestration_file="${project_dir}/orchestration.json"
+    
+    echo -e "${MAGENTA}=== Auto-Cursor Kanban Board: $project_id ===${NC}"
+    echo ""
+    
+    # Load tasks
+    local tasks=$(cat "$tasks_file" 2>/dev/null || echo "[]")
+    
+    # Group by status
+    local pending=$(echo "$tasks" | jq '[.[] | select(.status == "pending")]')
+    local running=$(echo "$tasks" | jq '[.[] | select(.status == "running")]')
+    local qa_running=$(echo "$tasks" | jq '[.[] | select(.status == "qa_running")]')
+    local completed=$(echo "$tasks" | jq '[.[] | select(.status == "completed" or .status == "qa_passed")]')
+    local failed=$(echo "$tasks" | jq '[.[] | select(.status == "qa_failed" or .status == "failed")]')
+    
+    # Display columns
+    printf "%-20s %-20s %-20s %-20s %-20s\n" "PENDING" "RUNNING" "QA" "COMPLETED" "FAILED"
+    echo "────────────────────────────────────────────────────────────────────────────────────────────"
+    
+    local max_rows=$(echo "$tasks" | jq '[length, (.[] | select(.status == "pending") | length), (.[] | select(.status == "running") | length), (.[] | select(.status == "qa_running") | length), (.[] | select(.status == "completed" or .status == "qa_passed") | length), (.[] | select(.status == "qa_failed" or .status == "failed") | length)] | max')
+    max_rows=${max_rows:-1}
+    
+    for i in $(seq 0 $((max_rows - 1))); do
+        local p=$(echo "$pending" | jq -r ".[$i].id // empty" | cut -c1-18)
+        local r=$(echo "$running" | jq -r ".[$i].id // empty" | cut -c1-18)
+        local q=$(echo "$qa_running" | jq -r ".[$i].id // empty" | cut -c1-18)
+        local c=$(echo "$completed" | jq -r ".[$i].id // empty" | cut -c1-18)
+        local f=$(echo "$failed" | jq -r ".[$i].id // empty" | cut -c1-18)
+        
+        printf "%-20s %-20s %-20s %-20s %-20s\n" "${p:-}" "${r:-}" "${q:-}" "${c:-}" "${f:-}"
+    done
+    
+    echo ""
+    
+    # Show orchestration status if running
+    if [ -f "$orchestration_file" ]; then
+        echo -e "${CYAN}Orchestration Status:${NC}"
+        orchestrate-agents status 2>&1 | grep -v "No agents" || echo "  No active agents"
+    fi
+}
+
+# Show tasks
+show_tasks() {
+    local project_id="$1"
+    local project_dir="${PROJECTS_DIR}/${project_id}"
+    
+    if [ ! -d "$project_dir" ]; then
+        echo -e "${RED}Error: Project not found: $project_id${NC}" >&2
+        exit 1
+    fi
+    
+    local tasks_file="${project_dir}/tasks.json"
+    
+    echo -e "${MAGENTA}=== Tasks: $project_id ===${NC}"
+    echo ""
+    
+    if [ ! -f "$tasks_file" ]; then
+        echo "No tasks found. Create a plan first with: auto-cursor plan $project_id <goal>"
+        return
+    fi
+    
+    local tasks=$(cat "$tasks_file")
+    local total=$(echo "$tasks" | jq 'length' 2>/dev/null || echo "0")
+    if [ -z "$total" ] || [ "$total" = "null" ] || [ "$total" = "0" ]; then
+        echo "No tasks found. Create a plan first with: auto-cursor plan $project_id <goal>"
+        return
+    fi
+    
+    local completed=$(echo "$tasks" | jq '[.[] | select(.status == "completed" or .status == "qa_passed")] | length' 2>/dev/null || echo "0")
+    local progress=$((completed * 100 / total))
+    
+    echo -e "${CYAN}Progress: $completed/$total tasks completed ($progress%)${NC}"
+    echo ""
+    
+    echo "$tasks" | jq -r '.[] | 
+        "\(.id) - \(.description)
+  Status: \(.status // "pending")
+  Complexity: \(.complexity // "unknown")
+  Directory: \(.directory // ".")
+  Dependencies: \(.dependencies // [] | join(", ") // "none")
+  Estimated: \(.estimated_hours // "unknown") hours
+"'
+}
+
+# Show agent logs
+show_logs() {
+    local project_id="$1"
+    local task_id="${2:-all}"
+    local project_dir="${PROJECTS_DIR}/${project_id}"
+    
+    if [ ! -d "$project_dir" ]; then
+        echo -e "${RED}Error: Project not found: $project_id${NC}" >&2
+        exit 1
+    fi
+    
+    if [ "$task_id" = "all" ]; then
+        echo -e "${CYAN}=== All Agent Logs: $project_id ===${NC}"
+        echo ""
+        
+        local tasks=$(cat "${project_dir}/tasks.json" 2>/dev/null || echo "[]")
+        local task_ids=$(echo "$tasks" | jq -r '.[].id')
+        
+        for tid in $task_ids; do
+            echo -e "${MAGENTA}--- Task: $tid ---${NC}"
+            orchestrate-agents logs "$tid" 2>/dev/null || echo "  No logs available"
+            echo ""
+        done
+    else
+        echo -e "${CYAN}=== Logs for $task_id ===${NC}"
+        echo ""
+        orchestrate-agents logs "$task_id" 2>/dev/null || {
+            echo -e "${YELLOW}No logs found. Agent may not be running.${NC}"
+            echo "Check status with: auto-cursor status $project_id"
+        }
+    fi
+}
+
+# Retry failed task
+retry_task() {
+    local project_id="$1"
+    local task_id="${2:-all}"
+    local project_dir="${PROJECTS_DIR}/${project_id}"
+    
+    if [ ! -d "$project_dir" ]; then
+        echo -e "${RED}Error: Project not found: $project_id${NC}" >&2
+        exit 1
+    fi
+    
+    local tasks_file="${project_dir}/tasks.json"
+    local tasks=$(cat "$tasks_file")
+    
+    if [ "$task_id" = "all" ]; then
+        local failed_tasks=$(echo "$tasks" | jq -r '.[] | select(.status == "qa_failed" or .status == "failed") | .id')
+        
+        if [ -z "$failed_tasks" ]; then
+            echo -e "${YELLOW}No failed tasks to retry${NC}"
+            return
+        fi
+        
+        echo -e "${CYAN}Retrying all failed tasks...${NC}"
+        for tid in $failed_tasks; do
+            retry_single_task "$project_id" "$tid" "$tasks_file"
+        done
+    else
+        retry_single_task "$project_id" "$task_id" "$tasks_file"
+    fi
+}
+
+retry_single_task() {
+    local project_id="$1"
+    local task_id="$2"
+    local tasks_file="$3"
+    
+    local task=$(cat "$tasks_file" | jq ".[] | select(.id == \"$task_id\")")
+    
+    if [ -z "$task" ]; then
+        echo -e "${RED}Error: Task not found: $task_id${NC}" >&2
+        return
+    fi
+    
+    local status=$(echo "$task" | jq -r '.status')
+    if [ "$status" != "qa_failed" ] && [ "$status" != "failed" ]; then
+        echo -e "${YELLOW}Task $task_id is not in failed state (current: $status)${NC}"
+        return
+    fi
+    
+    echo -e "${CYAN}Retrying task: $task_id${NC}"
+    
+    # Reset task status
+    local updated_tasks=$(cat "$tasks_file" | jq "map(if .id == \"$task_id\" then .status = \"pending\" | .retry_count = ((.retry_count // 0) + 1) else . end)")
+    echo "$updated_tasks" | jq '.' > "$tasks_file"
+    
+    # Restart execution for this task
+    echo -e "${GREEN}Task $task_id reset to pending. Run 'auto-cursor start $project_id' to retry.${NC}"
+}
+
+# Show diff before merge
+show_diff() {
+    local project_id="$1"
+    local task_id="$2"
+    local project_dir="${PROJECTS_DIR}/${project_id}"
+    
+    if [ ! -d "$project_dir" ]; then
+        echo -e "${RED}Error: Project not found: $project_id${NC}" >&2
+        exit 1
+    fi
+    
+    local project_path=$(jq -r '.path' "${project_dir}/config.json")
+    local worktree_name="auto-cursor-${project_id}-${task_id}"
+    local worktree_path="${WORKTREES_DIR}/${worktree_name}"
+    
+    if [ ! -d "$worktree_path" ]; then
+        echo -e "${RED}Error: Worktree not found for task: $task_id${NC}" >&2
+        return
+    fi
+    
+    echo -e "${CYAN}=== Diff for $task_id ===${NC}"
+    echo ""
+    
+    (
+        cd "$worktree_path"
+        if git rev-parse --git-dir >/dev/null 2>&1; then
+            git diff main...HEAD 2>/dev/null || git diff HEAD 2>/dev/null || echo "No changes to show"
+        else
+            # If not a git worktree, show file changes
+            echo "Worktree changes:"
+            diff -r "$project_path" "$worktree_path" 2>/dev/null | head -50 || echo "No differences found"
+        fi
+    )
+}
+
+# Review worktree changes
+review_worktree() {
+    local project_id="$1"
+    local task_id="${2:-all}"
+    local project_dir="${PROJECTS_DIR}/${project_id}"
+    
+    if [ ! -d "$project_dir" ]; then
+        echo -e "${RED}Error: Project not found: $project_id${NC}" >&2
+        exit 1
+    fi
+    
+    local project_path=$(jq -r '.path' "${project_dir}/config.json")
+    
+    if [ "$task_id" = "all" ]; then
+        local tasks=$(cat "${project_dir}/tasks.json" 2>/dev/null || echo "[]")
+        local task_ids=$(echo "$tasks" | jq -r '.[].id')
+        
+        for tid in $task_ids; do
+            echo -e "${MAGENTA}=== Reviewing: $tid ===${NC}"
+            show_diff "$project_id" "$tid"
+            echo ""
+        done
+    else
+        show_diff "$project_id" "$task_id"
+    fi
+}
+
+# Discard worktree without merging
+discard_worktree() {
+    local project_id="$1"
+    local task_id="${2:-all}"
+    local project_dir="${PROJECTS_DIR}/${project_id}"
+    
+    if [ ! -d "$project_dir" ]; then
+        echo -e "${RED}Error: Project not found: $project_id${NC}" >&2
+        exit 1
+    fi
+    
+    local project_path=$(jq -r '.path' "${project_dir}/config.json")
+    local tasks_file="${project_dir}/tasks.json"
+    
+    if [ "$task_id" = "all" ]; then
+        local tasks=$(cat "$tasks_file" 2>/dev/null || echo "[]")
+        local task_ids=$(echo "$tasks" | jq -r '.[].id')
+        
+        echo -e "${YELLOW}Discarding all worktrees for $project_id${NC}"
+        for tid in $task_ids; do
+            discard_single_worktree "$project_id" "$tid" "$project_path"
+        done
+    else
+        discard_single_worktree "$project_id" "$task_id" "$project_path"
+    fi
+}
+
+discard_single_worktree() {
+    local project_id="$1"
+    local task_id="$2"
+    local project_path="$3"
+    
+    local worktree_name="auto-cursor-${project_id}-${task_id}"
+    local worktree_path="${WORKTREES_DIR}/${worktree_name}"
+    
+    if [ ! -d "$worktree_path" ]; then
+        echo -e "${YELLOW}Worktree not found for $task_id, skipping...${NC}"
+        return
+    fi
+    
+    echo -e "${CYAN}Discarding worktree: $task_id${NC}"
+    
+    # Stop agent if running
+    orchestrate-agents stop "$task_id" 2>/dev/null || true
+    
+    # Remove worktree
+    (
+        cd "$project_path"
+        if git worktree list | grep -q "$worktree_path"; then
+            git worktree remove "$worktree_path" --force 2>/dev/null || true
+        fi
+    )
+    
+    # Remove directory
+    rm -rf "$worktree_path" 2>/dev/null || true
+    
+    # Remove git branch
+    (
+        cd "$project_path"
+        git branch -D "auto-cursor/${task_id}" 2>/dev/null || true
+    )
+    
+    echo -e "${GREEN}Discarded $task_id${NC}"
+}
+
+# Continue interrupted execution
+continue_execution() {
+    local project_id="$1"
+    local project_dir="${PROJECTS_DIR}/${project_id}"
+    
+    if [ ! -d "$project_dir" ]; then
+        echo -e "${RED}Error: Project not found: $project_id${NC}" >&2
+        exit 1
+    fi
+    
+    local tasks_file="${project_dir}/tasks.json"
+    local orchestration_file="${project_dir}/orchestration.json"
+    
+    if [ ! -f "$orchestration_file" ]; then
+        echo -e "${RED}Error: No orchestration file found. Run 'auto-cursor start $project_id' first.${NC}" >&2
+        exit 1
+    fi
+    
+    echo -e "${CYAN}Continuing execution for $project_id...${NC}"
+    
+    # Check which tasks are still pending/running
+    local tasks=$(cat "$tasks_file")
+    local incomplete=$(echo "$tasks" | jq '[.[] | select(.status == "pending" or .status == "running" or .status == "waiting")]')
+    
+    if [ "$(echo "$incomplete" | jq 'length')" -eq 0 ]; then
+        echo -e "${YELLOW}No incomplete tasks to continue${NC}"
+        return
+    fi
+    
+    echo -e "${BLUE}Resuming $(echo "$incomplete" | jq 'length') incomplete tasks...${NC}"
+    
+    # Restart orchestration
+    orchestrate-agents start "$orchestration_file"
+    
+    echo ""
+    echo -e "${CYAN}Use 'auto-cursor status $project_id' to monitor progress${NC}"
+}
+
+# Show memory/insights
+show_memory() {
+    local project_id="$1"
+    local project_dir="${PROJECTS_DIR}/${project_id}"
+    
+    if [ ! -d "$project_dir" ]; then
+        echo -e "${RED}Error: Project not found: $project_id${NC}" >&2
+        exit 1
+    fi
+    
+    local memory_file="${project_dir}/memory.json"
+    
+    echo -e "${MAGENTA}=== Memory & Insights: $project_id ===${NC}"
+    echo ""
+    
+    if [ -f "$memory_file" ]; then
+        cat "$memory_file" | jq '.' 2>/dev/null || cat "$memory_file"
+    else
+        echo "No memory/insights stored yet"
+    fi
+}
+
+# Clean project
+clean_project() {
+    local project_id="$1"
+    local project_dir="${PROJECTS_DIR}/${project_id}"
+    local worktrees_dir="${WORKTREES_DIR}"
+    
+    if [ ! -d "$project_dir" ]; then
+        echo -e "${RED}Error: Project not found: $project_id${NC}" >&2
+        exit 1
+    fi
+    
+    echo -e "${YELLOW}Cleaning up project: $project_id${NC}"
+    
+    # Stop only agents belonging to this project
+    local orchestration_file="${project_dir}/orchestration.json"
+    if [ -f "$orchestration_file" ]; then
+        # Get agent IDs for this project
+        local agent_ids=$(jq -r '.agents[].id' "$orchestration_file" 2>/dev/null || echo "")
+        
+        if [ -n "$agent_ids" ]; then
+            echo -e "${BLUE}Stopping agents for project $project_id...${NC}"
+            for agent_id in $agent_ids; do
+                orchestrate-agents stop "$agent_id" 2>/dev/null || true
+            done
+        fi
+    fi
+    
+    # Stop background monitor if running
+    local monitor_pid_file="${project_dir}/.monitor-pid"
+    if [ -f "$monitor_pid_file" ]; then
+        local monitor_pid=$(cat "$monitor_pid_file" 2>/dev/null || echo "")
+        if [ -n "$monitor_pid" ] && kill -0 "$monitor_pid" 2>/dev/null; then
+            kill "$monitor_pid" 2>/dev/null || true
+            echo -e "${BLUE}Stopped background monitor${NC}"
+        fi
+        rm -f "$monitor_pid_file"
+    fi
+    
+    # Remove worktrees
+    for worktree in "${worktrees_dir}"/auto-cursor-${project_id}-*; do
+        if [ -d "$worktree" ]; then
+            echo "Removing worktree: $(basename "$worktree")"
+            rm -rf "$worktree"
+        fi
+    done
+    
+    # Clean up git branches
+    local project_path=$(jq -r '.path' "${project_dir}/config.json")
+    if [ -d "$project_path/.git" ]; then
+        (
+            cd "$project_path"
+            git branch | grep "auto-cursor/" | xargs -r git branch -D 2>/dev/null || true
+        )
+    fi
+    
+    echo -e "${GREEN}Cleanup complete${NC}"
+}
+
+# Validate plan
+validate_plan() {
+    local project_id="$1"
+    local auto_fix="${2:-false}"
+    local project_dir="${PROJECTS_DIR}/${project_id}"
+    
+    if [ ! -d "$project_dir" ]; then
+        echo -e "${RED}Error: Project not found: $project_id${NC}" >&2
+        exit 1
+    fi
+    
+    local tasks_file="${project_dir}/tasks.json"
+    
+    if [ ! -f "$tasks_file" ]; then
+        echo -e "${RED}Error: No plan found. Create a plan first with: auto-cursor plan $project_id <goal>${NC}" >&2
+        exit 1
+    fi
+    
+    local task_length=$(cat "$tasks_file" | jq 'length' 2>/dev/null || echo "0")
+    if [ -z "$task_length" ] || [ "$task_length" = "null" ] || [ "$task_length" = "0" ]; then
+        echo -e "${RED}Error: No plan found. Create a plan first with: auto-cursor plan $project_id <goal>${NC}" >&2
+        exit 1
+    fi
+    
+    echo -e "${CYAN}=== Validating Plan: $project_id ===${NC}"
+    echo ""
+    
+    local tasks=$(cat "$tasks_file")
+    local errors=()
+    local warnings=()
+    
+    # Check 1: Duplicate task IDs
+    local duplicate_ids=$(echo "$tasks" | jq -r 'group_by(.id) | map(select(length > 1)) | .[][].id' 2>/dev/null || echo "")
+    if [ -n "$duplicate_ids" ]; then
+        errors+=("Duplicate task IDs: $(echo "$duplicate_ids" | tr '\n' ' ' | sed 's/ $//')")
+    fi
+    
+    # Check 2: Missing required fields
+    local missing_ids=$(echo "$tasks" | jq -r '.[] | select(.id == null or .id == "") | .id' 2>/dev/null || echo "")
+    if [ -n "$missing_ids" ]; then
+        errors+=("Tasks with missing IDs found")
+    fi
+    
+    local missing_descriptions=$(echo "$tasks" | jq -r '.[] | select(.description == null or .description == "") | .id' 2>/dev/null || echo "")
+    if [ -n "$missing_descriptions" ]; then
+        errors+=("Tasks with missing descriptions: $(echo "$missing_descriptions" | tr '\n' ' ' | sed 's/ $//')")
+    fi
+    
+    # Check 3: Circular dependencies
+    local task_ids=$(echo "$tasks" | jq -r '.[].id')
+    for task_id in $task_ids; do
+        local deps=$(echo "$tasks" | jq -r ".[] | select(.id == \"$task_id\") | .dependencies[]?" 2>/dev/null || echo "")
+        for dep in $deps; do
+            # Check if dependency exists
+            if ! echo "$tasks" | jq -e ".[] | select(.id == \"$dep\")" >/dev/null 2>&1; then
+                warnings+=("Task '$task_id' depends on non-existent task '$dep'")
+            fi
+            
+            # Check for circular dependency (simple check - direct cycles)
+            local dep_deps=$(echo "$tasks" | jq -r ".[] | select(.id == \"$dep\") | .dependencies[]?" 2>/dev/null || echo "")
+            if echo "$dep_deps" | grep -q "^${task_id}$"; then
+                errors+=("Circular dependency detected: $task_id <-> $dep")
+            fi
+        done
+    done
+    
+    # Check 4: Invalid complexity values
+    local invalid_complexity=$(echo "$tasks" | jq -r '.[] | select(.complexity != null and .complexity != "simple" and .complexity != "medium" and .complexity != "complex") | "\(.id): \(.complexity)"' 2>/dev/null || echo "")
+    if [ -n "$invalid_complexity" ]; then
+        warnings+=("Invalid complexity values: $invalid_complexity")
+    fi
+    
+    # Display results
+    if [ ${#errors[@]} -eq 0 ] && [ ${#warnings[@]} -eq 0 ]; then
+        echo -e "${GREEN}✅ Plan validation passed!${NC}"
+        echo ""
+        local task_count=$(echo "$tasks" | jq 'length')
+        echo "  Tasks: $task_count"
+        local total_hours=$(echo "$tasks" | jq '[.[] | .estimated_hours // 0] | add' 2>/dev/null || echo "0")
+        if [ "$total_hours" != "0" ] && [ "$total_hours" != "null" ]; then
+            echo "  Estimated time: ${total_hours} hours"
+        fi
+        return 0
+    fi
+    
+    # Show errors
+    if [ ${#errors[@]} -gt 0 ]; then
+        echo -e "${RED}❌ Validation Errors:${NC}"
+        for error in "${errors[@]}"; do
+            echo "  • $error"
+        done
+        echo ""
+    fi
+    
+    # Show warnings
+    if [ ${#warnings[@]} -gt 0 ]; then
+        echo -e "${YELLOW}⚠️  Validation Warnings:${NC}"
+        for warning in "${warnings[@]}"; do
+            echo "  • $warning"
+        done
+        echo ""
+    fi
+    
+    # Auto-fix if requested
+    if [ "$auto_fix" = "true" ] && [ ${#errors[@]} -gt 0 ]; then
+        echo -e "${BLUE}Attempting to auto-fix errors...${NC}"
+        # Basic auto-fix: remove duplicate IDs, fix missing fields
+        # This is a simple implementation - could be enhanced
+        echo -e "${YELLOW}Auto-fix not fully implemented yet. Please fix errors manually.${NC}"
+    fi
+    
+    return 1
+}
+
+# Review plan
+review_plan() {
+    local project_id="$1"
+    local project_dir="${PROJECTS_DIR}/${project_id}"
+    
+    if [ ! -d "$project_dir" ]; then
+        echo -e "${RED}Error: Project not found: $project_id${NC}" >&2
+        exit 1
+    fi
+    
+    local tasks_file="${project_dir}/tasks.json"
+    
+    if [ ! -f "$tasks_file" ]; then
+        echo -e "${RED}Error: No plan found. Create a plan first with: auto-cursor plan $project_id <goal>${NC}" >&2
+        exit 1
+    fi
+    
+    local task_length=$(cat "$tasks_file" | jq 'length' 2>/dev/null || echo "0")
+    if [ -z "$task_length" ] || [ "$task_length" = "null" ] || [ "$task_length" = "0" ]; then
+        echo -e "${RED}Error: No plan found. Create a plan first with: auto-cursor plan $project_id <goal>${NC}" >&2
+        exit 1
+    fi
+    
+    echo -e "${MAGENTA}=== Plan Review: $project_id ===${NC}"
+    echo ""
+    
+    local tasks=$(cat "$tasks_file")
+    local task_count=$(echo "$tasks" | jq 'length')
+    local total_hours=$(echo "$tasks" | jq '[.[] | .estimated_hours // 0] | add' 2>/dev/null || echo "0")
+    
+    echo -e "${CYAN}Summary:${NC}"
+    echo "  Tasks: $task_count"
+    if [ "$total_hours" != "0" ] && [ "$total_hours" != "null" ]; then
+        echo "  Estimated time: ${total_hours} hours"
+    fi
+    echo ""
+    
+    echo -e "${CYAN}Tasks:${NC}"
+    echo "$tasks" | jq -r '.[] | 
+        "\(.id) - \(.description)
+  Complexity: \(.complexity // "unknown")
+  Directory: \(.directory // ".")
+  Dependencies: \(.dependencies // [] | join(", ") // "none")
+  Estimated: \(.estimated_hours // "unknown") hours
+"'
+    
+    echo ""
+    echo -e "${YELLOW}Use 'auto-cursor plan-edit $project_id' to edit this plan${NC}"
+}
+
+# Edit plan interactively
+edit_plan() {
+    local project_id="$1"
+    local project_dir="${PROJECTS_DIR}/${project_id}"
+    
+    if [ ! -d "$project_dir" ]; then
+        echo -e "${RED}Error: Project not found: $project_id${NC}" >&2
+        exit 1
+    fi
+    
+    local tasks_file="${project_dir}/tasks.json"
+    
+    if [ ! -f "$tasks_file" ]; then
+        echo -e "${RED}Error: No plan found. Create a plan first with: auto-cursor plan $project_id <goal>${NC}" >&2
+        exit 1
+    fi
+    
+    local task_length=$(cat "$tasks_file" | jq 'length' 2>/dev/null || echo "0")
+    if [ -z "$task_length" ] || [ "$task_length" = "null" ] || [ "$task_length" = "0" ]; then
+        echo -e "${RED}Error: No plan found. Create a plan first with: auto-cursor plan $project_id <goal>${NC}" >&2
+        exit 1
+    fi
+    
+    echo -e "${CYAN}=== Plan Editor: $project_id ===${NC}"
+    echo ""
+    echo "Commands:"
+    echo "  add <description>     - Add new task"
+    echo "  remove <task-id>       - Remove task"
+    echo "  modify <task-id>       - Modify task"
+    echo "  list                   - List all tasks"
+    echo "  validate               - Validate plan"
+    echo "  save                   - Save and exit"
+    echo "  cancel                 - Cancel without saving"
+    echo ""
+    
+    # For now, provide instructions - full interactive editor can be enhanced later
+    echo -e "${YELLOW}Interactive editor coming soon.${NC}"
+    echo "For now, use:"
+    echo "  auto-cursor task-add $project_id <description>"
+    echo "  auto-cursor task-remove $project_id <task-id>"
+    echo "  auto-cursor task-modify $project_id <task-id>"
+}
+
+# Add task to plan
+add_task() {
+    local project_id="$1"
+    shift
+    local description="$*"
+    local project_dir="${PROJECTS_DIR}/${project_id}"
+    
+    if [ ! -d "$project_dir" ]; then
+        echo -e "${RED}Error: Project not found: $project_id${NC}" >&2
+        exit 1
+    fi
+    
+    local tasks_file="${project_dir}/tasks.json"
+    local tasks=$(cat "$tasks_file")
+    
+    # Generate task ID from description
+    local task_id=$(echo "$description" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-\|-$//g' | cut -c1-50)
+    local task_num=$(echo "$tasks" | jq 'length')
+    task_id="${task_id}-${task_num}"
+    
+    # Add task
+    local new_task=$(cat << EOF
+{
+  "id": "$task_id",
+  "description": "$description",
+  "dependencies": [],
+  "complexity": "medium",
+  "directory": ".",
+  "estimated_hours": 2,
+  "status": "pending",
+  "agent_id": null,
+  "worktree": null,
+  "created": $(date +%s),
+  "started": null,
+  "completed": null,
+  "qa_status": null
+}
+EOF
+)
+    
+    local updated_tasks=$(echo "$tasks" | jq ". + [$new_task]")
+    echo "$updated_tasks" | jq '.' > "$tasks_file"
+    
+    echo -e "${GREEN}Added task: $task_id${NC}"
+    echo "  Description: $description"
+}
+
+# Remove task from plan
+remove_task() {
+    local project_id="$1"
+    local task_id="$2"
+    local project_dir="${PROJECTS_DIR}/${project_id}"
+    
+    if [ ! -d "$project_dir" ]; then
+        echo -e "${RED}Error: Project not found: $project_id${NC}" >&2
+        exit 1
+    fi
+    
+    local tasks_file="${project_dir}/tasks.json"
+    local tasks=$(cat "$tasks_file")
+    
+    # Check if task exists
+    if ! echo "$tasks" | jq -e ".[] | select(.id == \"$task_id\")" >/dev/null 2>&1; then
+        echo -e "${RED}Error: Task not found: $task_id${NC}" >&2
+        exit 1
+    fi
+    
+    # Remove task and update dependencies
+    local updated_tasks=$(echo "$tasks" | jq "map(select(.id != \"$task_id\") | .dependencies = (.dependencies // [] | map(select(. != \"$task_id\"))))")
+    echo "$updated_tasks" | jq '.' > "$tasks_file"
+    
+    echo -e "${GREEN}Removed task: $task_id${NC}"
+}
+
+# Modify task in plan
+modify_task() {
+    local project_id="$1"
+    local task_id="$2"
+    local project_dir="${PROJECTS_DIR}/${project_id}"
+    
+    if [ ! -d "$project_dir" ]; then
+        echo -e "${RED}Error: Project not found: $project_id${NC}" >&2
+        exit 1
+    fi
+    
+    local tasks_file="${project_dir}/tasks.json"
+    local tasks=$(cat "$tasks_file")
+    
+    # Check if task exists
+    if ! echo "$tasks" | jq -e ".[] | select(.id == \"$task_id\")" >/dev/null 2>&1; then
+        echo -e "${RED}Error: Task not found: $task_id${NC}" >&2
+        exit 1
+    fi
+    
+    echo -e "${CYAN}Modifying task: $task_id${NC}"
+    echo ""
+    echo "Current task:"
+    echo "$tasks" | jq ".[] | select(.id == \"$task_id\")"
+    echo ""
+    echo "Enter new values (press Enter to keep current):"
+    
+    read -p "Description: " new_desc
+    read -p "Complexity (simple/medium/complex): " new_complexity
+    read -p "Directory: " new_directory
+    read -p "Estimated hours: " new_hours
+    
+    # Update task
+    local updated_tasks=$(echo "$tasks" | jq "
+        map(if .id == \"$task_id\" then
+            . + {
+                description: (if \"$new_desc\" != \"\" then \"$new_desc\" else .description end),
+                complexity: (if \"$new_complexity\" != \"\" then \"$new_complexity\" else .complexity end),
+                directory: (if \"$new_directory\" != \"\" then \"$new_directory\" else .directory end),
+                estimated_hours: (if \"$new_hours\" != \"\" then ($new_hours | tonumber) else .estimated_hours end)
+            }
+        else . end)
+    ")
+    
+    echo "$updated_tasks" | jq '.' > "$tasks_file"
+    echo -e "${GREEN}Updated task: $task_id${NC}"
+}
+
+# Pause task
+pause_task() {
+    local project_id="$1"
+    local task_id="$2"
+    local project_dir="${PROJECTS_DIR}/${project_id}"
+    
+    if [ ! -d "$project_dir" ]; then
+        echo -e "${RED}Error: Project not found: $project_id${NC}" >&2
+        exit 1
+    fi
+    
+    local worktree_name="auto-cursor-${project_id}-${task_id}"
+    local worktree_path="${WORKTREES_DIR}/${worktree_name}"
+    local pause_file="${worktree_path}/PAUSE"
+    
+    if [ ! -d "$worktree_path" ]; then
+        echo -e "${YELLOW}Worktree not found. Task may not be running.${NC}"
+        exit 1
+    fi
+    
+    touch "$pause_file"
+    echo -e "${GREEN}Paused task: $task_id${NC}"
+    echo "  Pause file: $pause_file"
+    echo "  To resume: rm $pause_file"
+    echo "  To add instructions: echo 'instructions' > ${worktree_path}/HUMAN_INPUT.md"
+}
+
+# Cancel task
+cancel_task() {
+    local project_id="$1"
+    local task_id="$2"
+    local project_dir="${PROJECTS_DIR}/${project_id}"
+    
+    if [ ! -d "$project_dir" ]; then
+        echo -e "${RED}Error: Project not found: $project_id${NC}" >&2
+        exit 1
+    fi
+    
+    echo -e "${YELLOW}Cancelling task: $task_id${NC}"
+    
+    # Stop agent
+    orchestrate-agents stop "$task_id" 2>/dev/null || true
+    
+    # Update task status
+    local tasks_file="${project_dir}/tasks.json"
+    local tasks=$(cat "$tasks_file")
+    local updated_tasks=$(echo "$tasks" | jq "map(if .id == \"$task_id\" then .status = \"failed\" else . end)")
+    echo "$updated_tasks" | jq '.' > "$tasks_file"
+    
+    echo -e "${GREEN}Cancelled task: $task_id${NC}"
+}
+
+# Enhanced progress tracking
+show_enhanced_progress() {
+    local project_id="$1"
+    local project_dir="${PROJECTS_DIR}/${project_id}"
+    
+    if [ ! -d "$project_dir" ]; then
+        echo -e "${RED}Error: Project not found: $project_id${NC}" >&2
+        exit 1
+    fi
+    
+    local tasks_file="${project_dir}/tasks.json"
+    local tasks=$(cat "$tasks_file" 2>/dev/null || echo "[]")
+    
+    local total=$(echo "$tasks" | jq 'length' 2>/dev/null || echo "0")
+    if [ -z "$total" ] || [ "$total" = "null" ] || [ "$total" = "0" ]; then
+        echo "No tasks found"
+        return
+    fi
+    
+    local completed=$(echo "$tasks" | jq '[.[] | select(.status == "completed" or .status == "qa_passed")] | length' 2>/dev/null || echo "0")
+    local running=$(echo "$tasks" | jq '[.[] | select(.status == "running")] | length' 2>/dev/null || echo "0")
+    local failed=$(echo "$tasks" | jq '[.[] | select(.status == "failed" or .status == "qa_failed")] | length' 2>/dev/null || echo "0")
+    
+    if [ "$total" = "0" ]; then
+        echo "No tasks found"
+        return
+    fi
+    
+    local progress=$((completed * 100 / total))
+    
+    echo -e "${MAGENTA}=== Progress: $project_id ===${NC}"
+    echo ""
+    echo -e "${CYAN}Overall Progress:${NC}"
+    echo "  Completed: $completed/$total ($progress%)"
+    echo "  Running: $running"
+    echo "  Failed: $failed"
+    echo ""
+    
+    # Progress bar
+    local bar_length=50
+    local filled=$((progress * bar_length / 100))
+    local bar=""
+    for i in $(seq 1 $bar_length); do
+        if [ $i -le $filled ]; then
+            bar="${bar}█"
+        else
+            bar="${bar}░"
+        fi
+    done
+    echo "  [$bar] $progress%"
+    echo ""
+    
+    # Time estimates
+    local total_estimated=$(echo "$tasks" | jq '[.[] | .estimated_hours // 0] | add' 2>/dev/null || echo "0")
+    local completed_estimated=$(echo "$tasks" | jq '[.[] | select(.status == "completed" or .status == "qa_passed") | .estimated_hours // 0] | add' 2>/dev/null || echo "0")
+    local remaining_estimated=$(echo "$total_estimated - $completed_estimated" | bc 2>/dev/null || echo "?")
+    
+    if [ "$total_estimated" != "0" ] && [ "$total_estimated" != "null" ]; then
+        echo -e "${CYAN}Time Estimates:${NC}"
+        echo "  Total estimated: ${total_estimated} hours"
+        echo "  Completed: ${completed_estimated} hours"
+        echo "  Remaining: ${remaining_estimated} hours"
+        echo ""
+    fi
+    
+    # Task breakdown
+    echo -e "${CYAN}Task Status:${NC}"
+    echo "$tasks" | jq -r '.[] | 
+        "\(.id): \(.status // "pending")
+  \(.description)
+  Estimated: \(.estimated_hours // "unknown") hours
+"'
+}
+
+# List projects
+list_projects() {
+    echo -e "${MAGENTA}=== Auto-Cursor Projects ===${NC}"
+    echo ""
+    
+    if [ ! -d "$PROJECTS_DIR" ] || [ -z "$(ls -A $PROJECTS_DIR 2>/dev/null)" ]; then
+        echo "No projects found"
+        return
+    fi
+    
+    for project_dir in "$PROJECTS_DIR"/*; do
+        if [ -d "$project_dir" ] && [ -f "${project_dir}/config.json" ]; then
+            local project_id=$(jq -r '.id' "${project_dir}/config.json")
+            local project_path=$(jq -r '.path' "${project_dir}/config.json")
+            local created=$(jq -r '.created' "${project_dir}/config.json")
+            
+            local task_count=$(jq 'length' "${project_dir}/tasks.json" 2>/dev/null || echo "0")
+            local completed=$(jq '[.[] | select(.status == "completed" or .status == "qa_passed")] | length' "${project_dir}/tasks.json" 2>/dev/null || echo "0")
+            
+            echo -e "${GREEN}$project_id${NC}"
+            echo "  Path: $project_path"
+            echo "  Tasks: $completed/$task_count completed"
+            echo "  Created: $created"
+            echo ""
+        fi
+    done
+}
+
+# Main command dispatch
+case "${1:-help}" in
+    init)
+        if [ -z "${2:-}" ]; then
+            echo -e "${RED}Error: Project path required${NC}" >&2
+            usage
+            exit 1
+        fi
+        init_project "$2" "${3:-}"
+        ;;
+    plan)
+        if [ -z "${2:-}" ]; then
+            echo -e "${RED}Error: Project ID required${NC}" >&2
+            usage
+            exit 1
+        fi
+        # Check if --interactive is used (goal not required)
+        if echo "${@:3}" | grep -q -- "--interactive"; then
+            plan_goal "$2" "${@:3}"
+        elif [ -z "${3:-}" ]; then
+            echo -e "${RED}Error: Goal required (or use --interactive)${NC}" >&2
+            usage
+            exit 1
+        else
+            plan_goal "$2" "${@:3}"
+        fi
+        ;;
+    start)
+        if [ -z "${2:-}" ]; then
+            echo -e "${RED}Error: Project ID required${NC}" >&2
+            usage
+            exit 1
+        fi
+        # Parse optional flags
+        _project_id="$2"
+        _max_iterations=""
+        _skip_qa="false"
+        shift 2
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                --max-iterations)
+                    _max_iterations="$2"
+                    shift 2
+                    ;;
+                --skip-qa)
+                    _skip_qa="true"
+                    shift
+                    ;;
+                *)
+                    shift
+                    ;;
+            esac
+        done
+        start_execution "$_project_id" "$_max_iterations" "$_skip_qa"
+        ;;
+    status)
+        if [ -z "${2:-}" ]; then
+            echo -e "${RED}Error: Project ID required${NC}" >&2
+            usage
+            exit 1
+        fi
+        if [ "${3:-}" = "--detailed" ]; then
+            show_enhanced_progress "$2"
+        else
+            show_status "$2"
+        fi
+        ;;
+    validate)
+        if [ -z "${2:-}" ]; then
+            echo -e "${RED}Error: Project ID required${NC}" >&2
+            usage
+            exit 1
+        fi
+        validate_plan "$2" "${3:-false}"
+        ;;
+    plan-review)
+        if [ -z "${2:-}" ]; then
+            echo -e "${RED}Error: Project ID required${NC}" >&2
+            usage
+            exit 1
+        fi
+        review_plan "$2"
+        ;;
+    plan-edit)
+        if [ -z "${2:-}" ]; then
+            echo -e "${RED}Error: Project ID required${NC}" >&2
+            usage
+            exit 1
+        fi
+        edit_plan "$2"
+        ;;
+    task-add)
+        if [ -z "${2:-}" ] || [ -z "${3:-}" ]; then
+            echo -e "${RED}Error: Project ID and task description required${NC}" >&2
+            usage
+            exit 1
+        fi
+        add_task "$2" "${@:3}"
+        ;;
+    task-remove)
+        if [ -z "${2:-}" ] || [ -z "${3:-}" ]; then
+            echo -e "${RED}Error: Project ID and task ID required${NC}" >&2
+            usage
+            exit 1
+        fi
+        remove_task "$2" "$3"
+        ;;
+    task-modify)
+        if [ -z "${2:-}" ] || [ -z "${3:-}" ]; then
+            echo -e "${RED}Error: Project ID and task ID required${NC}" >&2
+            usage
+            exit 1
+        fi
+        modify_task "$2" "$3"
+        ;;
+    pause)
+        if [ -z "${2:-}" ] || [ -z "${3:-}" ]; then
+            echo -e "${RED}Error: Project ID and task ID required${NC}" >&2
+            usage
+            exit 1
+        fi
+        pause_task "$2" "$3"
+        ;;
+    cancel)
+        if [ -z "${2:-}" ] || [ -z "${3:-}" ]; then
+            echo -e "${RED}Error: Project ID and task ID required${NC}" >&2
+            usage
+            exit 1
+        fi
+        cancel_task "$2" "$3"
+        ;;
+    board)
+        if [ -z "${2:-}" ]; then
+            echo -e "${RED}Error: Project ID required${NC}" >&2
+            usage
+            exit 1
+        fi
+        # Interactive board (refresh every 2 seconds)
+        while true; do
+            clear
+            show_status "$2"
+            echo ""
+            echo "Press Ctrl+C to exit"
+            sleep 2
+        done
+        ;;
+    list)
+        list_projects
+        ;;
+    logs)
+        if [ -z "${2:-}" ]; then
+            echo -e "${RED}Error: Project ID required${NC}" >&2
+            usage
+            exit 1
+        fi
+        show_logs "$2" "${3:-}"
+        ;;
+    retry)
+        if [ -z "${2:-}" ]; then
+            echo -e "${RED}Error: Project ID required${NC}" >&2
+            usage
+            exit 1
+        fi
+        retry_task "$2" "${3:-}"
+        ;;
+    diff)
+        if [ -z "${2:-}" ] || [ -z "${3:-}" ]; then
+            echo -e "${RED}Error: Project ID and task ID required${NC}" >&2
+            usage
+            exit 1
+        fi
+        show_diff "$2" "$3"
+        ;;
+    tasks)
+        if [ -z "${2:-}" ]; then
+            echo -e "${RED}Error: Project ID required${NC}" >&2
+            usage
+            exit 1
+        fi
+        show_tasks "$2"
+        ;;
+    merge)
+        if [ -z "${2:-}" ]; then
+            echo -e "${RED}Error: Project ID required${NC}" >&2
+            usage
+            exit 1
+        fi
+        auto-cursor-merge "$2" "${3:-all}"
+        ;;
+    memory)
+        if [ -z "${2:-}" ]; then
+            echo -e "${RED}Error: Project ID required${NC}" >&2
+            usage
+            exit 1
+        fi
+        show_memory "$2"
+        ;;
+    review)
+        if [ -z "${2:-}" ]; then
+            echo -e "${RED}Error: Project ID required${NC}" >&2
+            usage
+            exit 1
+        fi
+        review_worktree "$2" "${3:-all}"
+        ;;
+    discard)
+        if [ -z "${2:-}" ]; then
+            echo -e "${RED}Error: Project ID required${NC}" >&2
+            usage
+            exit 1
+        fi
+        discard_worktree "$2" "${3:-all}"
+        ;;
+    continue)
+        if [ -z "${2:-}" ]; then
+            echo -e "${RED}Error: Project ID required${NC}" >&2
+            usage
+            exit 1
+        fi
+        continue_execution "$2"
+        ;;
+    clean)
+        if [ -z "${2:-}" ]; then
+            echo -e "${RED}Error: Project ID required${NC}" >&2
+            usage
+            exit 1
+        fi
+        clean_project "$2"
+        ;;
+    help|--help|-h)
+        usage
+        ;;
+    *)
+        echo -e "${RED}Unknown command: $1${NC}" >&2
+        echo ""
+        usage
+        exit 1
+        ;;
+esac
