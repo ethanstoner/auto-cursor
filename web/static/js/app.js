@@ -290,6 +290,21 @@ window.addEventListener('click', (e) => {
     }
 });
 
+// Load projects for memory select
+async function loadProjectsForMemory() {
+    const select = document.getElementById('memory-project-select');
+    
+    try {
+        const response = await fetch(`${API_BASE}/projects`);
+        const projects = await response.json();
+        
+        select.innerHTML = '<option value="">Select a project...</option>' +
+            projects.map(p => `<option value="${p.id}">${p.id}</option>`).join('');
+    } catch (error) {
+        console.error('Error loading projects:', error);
+    }
+}
+
 // Initial load
 loadProjects();
 loadProjectsForSelect();
