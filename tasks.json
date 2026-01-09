@@ -1,0 +1,146 @@
+[
+  {
+    "id": "dep-non-critical",
+    "description": "Add critical/non-critical flag to task dependencies in plan.json schema",
+    "dependencies": [],
+    "complexity": "simple",
+    "directory": "bin",
+    "estimated_hours": 1
+  },
+  {
+    "id": "dep-check-logic",
+    "description": "Modify check_dependencies() in orchestrate-agents to allow non-critical dependency failures",
+    "dependencies": ["dep-non-critical"],
+    "complexity": "medium",
+    "directory": "bin",
+    "estimated_hours": 3
+  },
+  {
+    "id": "dep-planner-update",
+    "description": "Update auto-cursor-planner to mark dependencies as critical/non-critical based on task analysis",
+    "dependencies": ["dep-non-critical"],
+    "complexity": "medium",
+    "directory": "bin",
+    "estimated_hours": 4
+  },
+  {
+    "id": "retry-mechanism",
+    "description": "Add retry tracking fields (retry_count, last_retry_time, next_retry_time) to tasks.json schema",
+    "dependencies": [],
+    "complexity": "simple",
+    "directory": "bin",
+    "estimated_hours": 1
+  },
+  {
+    "id": "retry-backoff",
+    "description": "Implement exponential backoff calculation function (base_delay * 2^retry_count, max 1 hour)",
+    "dependencies": ["retry-mechanism"],
+    "complexity": "simple",
+    "directory": "bin",
+    "estimated_hours": 2
+  },
+  {
+    "id": "retry-automatic",
+    "description": "Add automatic retry logic to orchestrate-agents monitor that retries failed tasks with backoff",
+    "dependencies": ["retry-mechanism", "retry-backoff"],
+    "complexity": "medium",
+    "directory": "bin",
+    "estimated_hours": 4
+  },
+  {
+    "id": "retry-cli-command",
+    "description": "Enhance auto-cursor retry command to support automatic retry with configurable max retries",
+    "dependencies": ["retry-mechanism", "retry-backoff"],
+    "complexity": "simple",
+    "directory": "bin",
+    "estimated_hours": 2
+  },
+  {
+    "id": "qa-auto-fix-detection",
+    "description": "Enhance QA wrapper to classify issues as minor (formatting, docs) vs critical (tests, build errors)",
+    "dependencies": [],
+    "complexity": "medium",
+    "directory": "bin",
+    "estimated_hours": 3
+  },
+  {
+    "id": "qa-auto-fix-minor",
+    "description": "Implement auto-fix logic for minor QA issues (formatting, missing docs, file structure)",
+    "dependencies": ["qa-auto-fix-detection"],
+    "complexity": "complex",
+    "directory": "bin",
+    "estimated_hours": 6
+  },
+  {
+    "id": "qa-integration",
+    "description": "Integrate auto-fix into run_qa_for_agent() to automatically fix minor issues before reporting",
+    "dependencies": ["qa-auto-fix-detection", "qa-auto-fix-minor"],
+    "complexity": "medium",
+    "directory": "bin",
+    "estimated_hours": 3
+  },
+  {
+    "id": "stuck-detection-enhance",
+    "description": "Enhance stuck agent detection in server.py to check process activity, log updates, and CPU usage",
+    "dependencies": [],
+    "complexity": "medium",
+    "directory": "web",
+    "estimated_hours": 4
+  },
+  {
+    "id": "stuck-recovery",
+    "description": "Implement recovery mechanism for stuck agents (restart, reset state, notify user)",
+    "dependencies": ["stuck-detection-enhance"],
+    "complexity": "medium",
+    "directory": "bin",
+    "estimated_hours": 4
+  },
+  {
+    "id": "stuck-timeout-config",
+    "description": "Add configurable timeout thresholds for stuck detection (default: 10 min no log update, 30 min total)",
+    "dependencies": ["stuck-detection-enhance"],
+    "complexity": "simple",
+    "directory": "bin",
+    "estimated_hours": 2
+  },
+  {
+    "id": "web-realtime-api",
+    "description": "Add WebSocket or Server-Sent Events (SSE) endpoint to server.py for real-time status updates",
+    "dependencies": [],
+    "complexity": "medium",
+    "directory": "web",
+    "estimated_hours": 5
+  },
+  {
+    "id": "web-realtime-client",
+    "description": "Update app.js to use WebSocket/SSE for real-time updates instead of polling",
+    "dependencies": ["web-realtime-api"],
+    "complexity": "medium",
+    "directory": "web",
+    "estimated_hours": 4
+  },
+  {
+    "id": "web-dependency-graph",
+    "description": "Create dependency graph visualization component using D3.js or vis.js showing task relationships",
+    "dependencies": [],
+    "complexity": "complex",
+    "directory": "web",
+    "estimated_hours": 6
+  },
+  {
+    "id": "web-dependency-api",
+    "description": "Add API endpoint to return task dependency graph data (nodes, edges, critical flags)",
+    "dependencies": [],
+    "complexity": "simple",
+    "directory": "web",
+    "estimated_hours": 2
+  },
+  {
+    "id": "web-dependency-integration",
+    "description": "Integrate dependency graph visualization into kanban board view with interactive controls",
+    "dependencies": ["web-dependency-graph", "web-dependency-api"],
+    "complexity": "medium",
+    "directory": "web",
+    "estimated_hours": 3
+  }
+]

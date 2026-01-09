@@ -3,77 +3,403 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Auto-Cursor - Web Interface</title>
+    <title>Auto-Cursor - Autonomous Multi-Agent Coding Framework</title>
+    <link rel="icon" type="image/png" sizes="192x192" href="{{ url_for('static', filename='logo.png') }}">
+    <link rel="apple-touch-icon" sizes="192x192" href="{{ url_for('static', filename='logo.png') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
-    <div class="container">
-        <header>
-            <div class="header-content">
-                <h1>🚀 Auto-Cursor</h1>
-                <p>Autonomous Multi-Agent Coding Framework</p>
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <img src="{{ url_for('static', filename='logo.png') }}" alt="Auto-Cursor" class="sidebar-logo">
+            <h1 class="sidebar-title">Auto-Cursor</h1>
+        </div>
+        
+        <nav class="sidebar-nav">
+            <!-- Project Selector -->
+            <div class="sidebar-section">
+                <label class="sidebar-label">Project</label>
+                <select id="sidebar-project-select" class="sidebar-select">
+                    <option value="">Select project...</option>
+                </select>
+            </div>
+            
+            <!-- Main Navigation -->
+            <div class="sidebar-section">
+                <button class="sidebar-item active" data-view="kanban">
+                    <img src="https://unpkg.com/lucide-static@latest/icons/layout-grid.svg" alt="Kanban" class="sidebar-icon">
+                    <span class="sidebar-text">Kanban Board</span>
+                </button>
+                <button class="sidebar-item" data-view="agents">
+                    <img src="https://unpkg.com/lucide-static@latest/icons/zap.svg" alt="Agents" class="sidebar-icon">
+                    <span class="sidebar-text">Agent Terminals</span>
+                </button>
+                <button class="sidebar-item" data-view="insights">
+                    <img src="https://unpkg.com/lucide-static@latest/icons/trending-up.svg" alt="Insights" class="sidebar-icon">
+                    <span class="sidebar-text">Insights</span>
+                </button>
+                <button class="sidebar-item" data-view="roadmap">
+                    <img src="https://unpkg.com/lucide-static@latest/icons/map.svg" alt="Roadmap" class="sidebar-icon">
+                    <span class="sidebar-text">Roadmap</span>
+                </button>
+                <button class="sidebar-item" data-view="ideation">
+                    <img src="https://unpkg.com/lucide-static@latest/icons/lightbulb.svg" alt="Ideation" class="sidebar-icon">
+                    <span class="sidebar-text">Ideation</span>
+                </button>
+                <button class="sidebar-item" data-view="changelog">
+                    <img src="https://unpkg.com/lucide-static@latest/icons/file-text.svg" alt="Changelog" class="sidebar-icon">
+                    <span class="sidebar-text">Changelog</span>
+                </button>
+                <button class="sidebar-item" data-view="context">
+                    <img src="https://unpkg.com/lucide-static@latest/icons/database.svg" alt="Context" class="sidebar-icon">
+                    <span class="sidebar-text">Context</span>
+                </button>
+            </div>
+            
+            <!-- Tools Section -->
+            <div class="sidebar-section">
+                <label class="sidebar-label">Tools</label>
+                <button class="sidebar-item" data-view="github-issues">
+                    <img src="https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/github.svg" alt="GitHub" class="sidebar-icon">
+                    <span class="sidebar-text">GitHub Issues</span>
+                </button>
+                <button class="sidebar-item" data-view="worktrees">
+                    <img src="https://unpkg.com/lucide-static@latest/icons/git-branch.svg" alt="Worktrees" class="sidebar-icon">
+                    <span class="sidebar-text">Worktrees</span>
+                </button>
+            </div>
+            
+            <!-- Settings -->
+            <div class="sidebar-section">
+                <button class="sidebar-item" data-view="settings">
+                    <img src="https://unpkg.com/lucide-static@latest/icons/settings.svg" alt="Settings" class="sidebar-icon">
+                    <span class="sidebar-text">Settings</span>
+                </button>
+            </div>
+            
+            <!-- New Task CTA -->
+            <div class="sidebar-footer">
+                <button class="btn btn-primary btn-new-task" id="new-task-btn">
+                    <img src="https://unpkg.com/lucide-static@latest/icons/plus.svg" alt="Add" class="btn-icon">
+                    <span>New Task</span>
+                </button>
+            </div>
+        </nav>
+    </aside>
+    
+    <!-- Main Content Area -->
+    <main class="main-content" id="main-content">
+        <!-- Header Stats -->
+        <header class="main-header">
+            <div class="header-stats" id="header-stats">
+                <div class="stat-item">
+                    <div class="stat-value" id="stat-projects">-</div>
+                    <div class="stat-label">Projects</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="stat-agents">-</div>
+                    <div class="stat-label">Agents</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="stat-running">-</div>
+                    <div class="stat-label">Running</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="stat-completed">-</div>
+                    <div class="stat-label">Completed</div>
+                </div>
             </div>
         </header>
-
-        <nav class="tabs">
-            <button class="tab active" data-tab="projects">Projects</button>
-            <button class="tab" data-tab="kanban">Kanban Board</button>
-            <button class="tab" data-tab="memory">Memory</button>
-        </nav>
-
-        <!-- Projects Tab -->
-        <div id="projects-tab" class="tab-content active">
-            <div class="projects-header">
-                <h2>Projects</h2>
-                <button id="new-project-btn" class="btn btn-primary">+ New Project</button>
+        
+        <!-- View Content -->
+        <div class="view-container">
+            <!-- Kanban Board View -->
+            <div id="view-kanban" class="view active">
+                <div class="view-header">
+                    <h2>Kanban Board</h2>
+                    <div class="view-actions">
+                        <button id="refresh-kanban-btn" class="btn btn-secondary">Refresh</button>
+                    </div>
+                </div>
+                <div id="kanban-board" class="kanban-board">
+                    <div class="kanban-column" data-column="planning">
+                        <div class="kanban-column-header">
+                            <h3>Planning</h3>
+                            <span class="column-count" id="count-planning">0</span>
+                        </div>
+                        <div id="planning-column" class="column-content"></div>
+                    </div>
+                    <div class="kanban-column" data-column="in-progress">
+                        <div class="kanban-column-header">
+                            <h3>In Progress</h3>
+                            <span class="column-count" id="count-in-progress">0</span>
+                        </div>
+                        <div id="in-progress-column" class="column-content"></div>
+                    </div>
+                    <div class="kanban-column" data-column="ai-review">
+                        <div class="kanban-column-header">
+                            <h3>AI Review</h3>
+                            <span class="column-count" id="count-ai-review">0</span>
+                        </div>
+                        <div id="ai-review-column" class="column-content"></div>
+                    </div>
+                    <div class="kanban-column" data-column="human-review">
+                        <div class="kanban-column-header">
+                            <h3>Human Review</h3>
+                            <span class="column-count" id="count-human-review">0</span>
+                        </div>
+                        <div id="human-review-column" class="column-content"></div>
+                    </div>
+                    <div class="kanban-column" data-column="done">
+                        <div class="kanban-column-header">
+                            <h3>Done</h3>
+                            <span class="column-count" id="count-done">0</span>
+                        </div>
+                        <div id="done-column" class="column-content"></div>
+                    </div>
+                </div>
             </div>
-            <div id="projects-list" class="projects-grid"></div>
+            
+            <!-- Agent Terminals View -->
+            <div id="view-agents" class="view">
+                <div class="view-header">
+                    <h2>Agent Terminals</h2>
+                    <div class="view-actions">
+                        <button id="refresh-agents-btn" class="btn btn-secondary">Refresh</button>
+                    </div>
+                </div>
+                <div id="agents-terminals" class="agents-terminals"></div>
+            </div>
+            
+            <!-- Insights View -->
+            <div id="view-insights" class="view">
+                <div class="view-header">
+                    <h2>Insights & Analytics</h2>
+                </div>
+                <div id="insights-content" class="insights-content">
+                    <div class="insights-grid">
+                        <div class="insight-card">
+                            <h3>Tasks Completed</h3>
+                            <div class="insight-value" id="insight-tasks-completed">0</div>
+                            <div class="insight-chart" id="chart-tasks-completed"></div>
+                        </div>
+                        <div class="insight-card">
+                            <h3>Agent Utilization</h3>
+                            <div class="insight-value" id="insight-agent-util">0%</div>
+                            <div class="insight-chart" id="chart-agent-util"></div>
+                        </div>
+                        <div class="insight-card">
+                            <h3>Bottlenecks</h3>
+                            <div class="insight-value" id="insight-bottlenecks">-</div>
+                            <div class="insight-list" id="list-bottlenecks"></div>
+                        </div>
+                        <div class="insight-card">
+                            <h3>Success Rate</h3>
+                            <div class="insight-value" id="insight-success-rate">0%</div>
+                            <div class="insight-chart" id="chart-success-rate"></div>
+                        </div>
+                        <div class="insight-card">
+                            <h3>Avg Execution Time</h3>
+                            <div class="insight-value" id="insight-avg-time">-</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Roadmap View -->
+            <div id="view-roadmap" class="view">
+                <div class="view-header">
+                    <h2>Roadmap</h2>
+                    <div class="view-actions">
+                        <select id="roadmap-view-select" class="view-select">
+                            <option value="priority">By Priority</option>
+                            <option value="phase">By Phase</option>
+                            <option value="all">All Features</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="roadmap-content" class="roadmap-content">
+                    <div class="roadmap-categories">
+                        <div class="roadmap-category" data-category="must-have">
+                            <h3>Must Have</h3>
+                            <div id="roadmap-must-have" class="roadmap-items"></div>
+                        </div>
+                        <div class="roadmap-category" data-category="should-have">
+                            <h3>Should Have</h3>
+                            <div id="roadmap-should-have" class="roadmap-items"></div>
+                        </div>
+                        <div class="roadmap-category" data-category="could-have">
+                            <h3>Could Have</h3>
+                            <div id="roadmap-could-have" class="roadmap-items"></div>
+                        </div>
+                        <div class="roadmap-category" data-category="wont-have">
+                            <h3>Won't Have</h3>
+                            <div id="roadmap-wont-have" class="roadmap-items"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Ideation View -->
+            <div id="view-ideation" class="view">
+                <div class="view-header">
+                    <h2>Ideation</h2>
+                    <div class="view-actions">
+                        <button id="new-idea-btn" class="btn btn-primary">+ New Idea</button>
+                    </div>
+                </div>
+                <div id="ideation-content" class="ideation-content">
+                    <div class="empty-state">
+                        <h3>No ideas yet</h3>
+                        <p>Start brainstorming new features and improvements</p>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Changelog View -->
+            <div id="view-changelog" class="view">
+                <div class="view-header">
+                    <h2>Changelog</h2>
+                </div>
+                <div id="changelog-content" class="changelog-content">
+                    <div class="changelog-timeline" id="changelog-timeline"></div>
+                </div>
+            </div>
+            
+            <!-- Context View -->
+            <div id="view-context" class="view">
+                <div class="view-header">
+                    <h2>Context & Memory</h2>
+                </div>
+                <div id="context-content" class="context-content">
+                    <div class="context-section">
+                        <h3>Project Context</h3>
+                        <div id="context-project" class="context-item"></div>
+                    </div>
+                    <div class="context-section">
+                        <h3>Persistent Memory</h3>
+                        <div id="context-memory" class="context-item"></div>
+                    </div>
+                    <div class="context-section">
+                        <h3>Recent Decisions</h3>
+                        <div id="context-decisions" class="context-item"></div>
+                    </div>
+                    <div class="context-section">
+                        <h3>Relevant Files</h3>
+                        <div id="context-files" class="context-item"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- GitHub Issues View -->
+            <div id="view-github-issues" class="view">
+                <div class="view-header">
+                    <h2>GitHub Issues</h2>
+                </div>
+                <div id="github-issues-content" class="github-issues-content">
+                    <div class="empty-state">
+                        <h3>No GitHub integration</h3>
+                        <p>Connect your GitHub repository to sync issues</p>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Worktrees View -->
+            <div id="view-worktrees" class="view">
+                <div class="view-header">
+                    <h2>Worktrees</h2>
+                </div>
+                <div id="worktrees-content" class="worktrees-content">
+                    <div class="worktrees-list" id="worktrees-list"></div>
+                </div>
+            </div>
+            
+            <!-- Settings View -->
+            <div id="view-settings" class="view">
+                <div class="view-header">
+                    <h2>Settings</h2>
+                </div>
+                <div id="settings-content" class="settings-content">
+                    <div class="settings-section">
+                        <h3>General</h3>
+                        <div class="settings-item">
+                            <label>Auto-refresh interval (seconds)</label>
+                            <input type="number" id="setting-refresh-interval" value="3" min="1" max="60" class="settings-input">
+                            <p class="settings-help">How often to refresh data automatically</p>
+                        </div>
+                        <div class="settings-item">
+                            <label>Default project</label>
+                            <select id="setting-default-project" class="settings-select">
+                                <option value="">None</option>
+                            </select>
+                            <p class="settings-help">Project to load automatically on startup</p>
+                        </div>
+                    </div>
+                    
+                    <div class="settings-section">
+                        <h3>Appearance</h3>
+                        <div class="settings-item">
+                            <label>
+                                <input type="checkbox" id="setting-compact-view" class="settings-checkbox">
+                                Compact view
+                            </label>
+                            <p class="settings-help">Reduce spacing for more content</p>
+                        </div>
+                        <div class="settings-item">
+                            <label>
+                                <input type="checkbox" id="setting-animations" class="settings-checkbox" checked>
+                                Enable animations
+                            </label>
+                            <p class="settings-help">Smooth transitions and effects</p>
+                        </div>
+                    </div>
+                    
+                    <div class="settings-section">
+                        <h3>GitHub Integration</h3>
+                        <div class="settings-item">
+                            <label>Repository</label>
+                            <input type="text" id="setting-github-repo" value="ethanstoner/auto-cursor" class="settings-input" readonly>
+                            <p class="settings-help">GitHub repository for issues and integration</p>
+                        </div>
+                        <div class="settings-item">
+                            <label>GitHub Token (optional)</label>
+                            <input type="password" id="setting-github-token" placeholder="ghp_..." class="settings-input">
+                            <p class="settings-help">Personal access token for higher rate limits</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
-
-        <!-- Kanban Board Tab -->
-        <div id="kanban-tab" class="tab-content">
-            <div class="kanban-header">
-                <select id="project-select" class="project-select">
-                    <option value="">Select a project...</option>
-                </select>
-                <button id="refresh-btn" class="btn btn-secondary">Refresh</button>
-            </div>
-            <div id="kanban-board" class="kanban-board">
-                <div class="kanban-column">
-                    <h3>PENDING</h3>
-                    <div id="pending-column" class="column-content"></div>
+    </main>
+    
+    <!-- Modals -->
+    <div id="new-task-modal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>Create New Task</h2>
+            <form id="new-task-form">
+                <div class="form-group">
+                    <label for="task-title">Task Title:</label>
+                    <input type="text" id="task-title" required placeholder="Enter task title">
                 </div>
-                <div class="kanban-column">
-                    <h3>RUNNING</h3>
-                    <div id="running-column" class="column-content"></div>
+                <div class="form-group">
+                    <label for="task-description">Description:</label>
+                    <textarea id="task-description" rows="4" placeholder="Describe the task..."></textarea>
                 </div>
-                <div class="kanban-column">
-                    <h3>QA</h3>
-                    <div id="qa-column" class="column-content"></div>
+                <div class="form-group">
+                    <label for="task-priority">Priority:</label>
+                    <select id="task-priority" required>
+                        <option value="low">Low</option>
+                        <option value="medium">Medium</option>
+                        <option value="high">High</option>
+                    </select>
                 </div>
-                <div class="kanban-column">
-                    <h3>COMPLETED</h3>
-                    <div id="completed-column" class="column-content"></div>
-                </div>
-                <div class="kanban-column">
-                    <h3>FAILED</h3>
-                    <div id="failed-column" class="column-content"></div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Memory Tab -->
-        <div id="memory-tab" class="tab-content">
-            <div class="memory-header">
-                <select id="memory-project-select" class="project-select">
-                    <option value="">Select a project...</option>
-                </select>
-            </div>
-            <div id="memory-content" class="memory-content"></div>
+                <button type="submit" class="btn btn-primary">Create Task</button>
+            </form>
         </div>
     </div>
-
-    <!-- New Project Modal -->
+    
     <div id="new-project-modal" class="modal">
         <div class="modal-content">
             <span class="close">&times;</span>
@@ -91,8 +417,7 @@
             </form>
         </div>
     </div>
-
-    <!-- Plan Modal -->
+    
     <div id="plan-modal" class="modal">
         <div class="modal-content">
             <span class="close">&times;</span>
@@ -100,13 +425,13 @@
             <form id="plan-form">
                 <div class="form-group">
                     <label for="plan-goal">Goal:</label>
-                    <textarea id="plan-goal" required rows="4" placeholder="Describe what you want to build..."></textarea>
+                    <textarea id="plan-goal" required rows="6" placeholder="Describe what you want to build..."></textarea>
                 </div>
                 <button type="submit" class="btn btn-primary">Create Plan</button>
             </form>
         </div>
     </div>
-
+    
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
 </html>

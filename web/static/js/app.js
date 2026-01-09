@@ -1,311 +1,1527 @@
-// Auto-Cursor Web Interface
+// Auto-Cursor Web Interface - Complete Overhaul
 const API_BASE = '/api';
 
+// State Management
 let currentProjectId = null;
-let refreshInterval = null;
+let currentView = 'kanban';
+let refreshIntervals = {};
+let draggedTask = null;
 
-// Tab switching
-document.querySelectorAll('.tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-        const tabName = tab.dataset.tab;
-        switchTab(tabName);
+// Smooth content update helper to prevent black flash during refreshes
+function smoothUpdate(element, newHTML) {
+    if (!element) return;
+    if (element.innerHTML === newHTML) return; // No change needed
+    
+    // Fade out slightly, update content, fade back in
+    element.style.opacity = '0.7';
+    element.style.transition = 'opacity 0.2s ease';
+    setTimeout(() => {
+        element.innerHTML = newHTML;
+        element.style.opacity = '1';
+    }, 100);
+}
+
+// Initialize - Use both DOMContentLoaded and immediate execution for reliability
+function initializeApp() {
+    console.log('🚀 Auto-Cursor Web UI initializing...');
+    try {
+        initializeSidebar();
+        initializeViews();
+        initializeModals();
+        initializeDragDrop();
+        // CRITICAL: Wait for loadInitialData to complete before starting refresh
+        loadInitialData().then(() => {
+            console.log('✅ Initial data loaded');
+            startGlobalRefresh();
+        }).catch(err => {
+            console.error('❌ Error loading initial data:', err);
+            // Still start refresh even if initial load fails
+            startGlobalRefresh();
+        });
+        console.log('✅ Initialization complete');
+    } catch (error) {
+        console.error('❌ Initialization error:', error);
+        console.error('Error stack:', error.stack);
+    }
+}
+
+// Try immediate execution if DOM is already loaded
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initializeApp);
+} else {
+    // DOM already loaded, execute immediately
+    initializeApp();
+}
+
+// Also try after a short delay as fallback
+setTimeout(() => {
+    const select = document.getElementById('sidebar-project-select');
+    if (select && select.options.length <= 1) {
+        console.log('⚠️ Fallback: Project selector not populated, retrying...');
+        if (typeof loadProjectsForSidebar === 'function') {
+            loadProjectsForSidebar().catch(err => console.error('Fallback error:', err));
+        }
+        if (typeof refreshStats === 'function') {
+            refreshStats().catch(err => console.error('Fallback stats error:', err));
+        }
+    }
+}, 5000);
+
+// Sidebar Management
+function initializeSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const toggle = document.getElementById('sidebar-toggle');
+    const projectSelect = document.getElementById('sidebar-project-select');
+    const mainContent = document.getElementById('main-content');
+    
+    // Hamburger menu removed - sidebar is always visible
+    
+    // Sidebar navigation
+    document.querySelectorAll('.sidebar-item[data-view]').forEach(item => {
+        item.addEventListener('click', () => {
+            const view = item.dataset.view;
+            switchView(view);
+        });
     });
-});
-
-function switchTab(tabName) {
-    // Update tabs
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
     
-    // Update content
-    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-    document.getElementById(`${tabName}-tab`).classList.add('active');
-    
-    // Load tab data
-    if (tabName === 'projects') {
-        loadProjects();
-    } else if (tabName === 'kanban') {
-        loadProjectsForSelect();
-    } else if (tabName === 'memory') {
-        loadProjectsForMemory();
-    }
-}
-
-// Load projects
-async function loadProjects() {
-    const container = document.getElementById('projects-list');
-    container.innerHTML = '<div class="loading">Loading projects...</div>';
-    
-    try {
-        const response = await fetch(`${API_BASE}/projects`);
-        const projects = await response.json();
-        
-        if (projects.length === 0) {
-            container.innerHTML = '<div class="empty-state"><h3>No projects yet</h3><p>Create your first project to get started</p></div>';
-            return;
-        }
-        
-        container.innerHTML = projects.map(project => `
-            <div class="project-card">
-                <h3>${project.id}</h3>
-                <p>${project.path}</p>
-                <div class="project-actions">
-                    <button class="btn btn-primary btn-small" onclick="createPlan('${project.id}')">Create Plan</button>
-                    <button class="btn btn-secondary btn-small" onclick="startProject('${project.id}')">Start</button>
-                    <button class="btn btn-secondary btn-small" onclick="viewKanban('${project.id}')">View Board</button>
-                </div>
-            </div>
-        `).join('');
-    } catch (error) {
-        container.innerHTML = `<div class="empty-state"><h3>Error</h3><p>${error.message}</p></div>`;
-    }
-}
-
-// Load projects for select dropdown
-async function loadProjectsForSelect() {
-    const select = document.getElementById('project-select');
-    const memorySelect = document.getElementById('memory-project-select');
-    
-    try {
-        const response = await fetch(`${API_BASE}/projects`);
-        const projects = await response.json();
-        
-        select.innerHTML = '<option value="">Select a project...</option>' +
-            projects.map(p => `<option value="${p.id}">${p.id}</option>`).join('');
-        
-        memorySelect.innerHTML = '<option value="">Select a project...</option>' +
-            projects.map(p => `<option value="${p.id}">${p.id}</option>`).join('');
-        
+    // Project selector
+    projectSelect?.addEventListener('change', (e) => {
+        currentProjectId = e.target.value;
         if (currentProjectId) {
-            select.value = currentProjectId;
-            loadKanban(currentProjectId);
+            loadViewData(currentView);
         }
-    } catch (error) {
-        console.error('Error loading projects:', error);
+    });
+    
+    // New Task button
+    document.getElementById('new-task-btn')?.addEventListener('click', () => {
+        document.getElementById('new-task-modal').style.display = 'block';
+    });
+}
+
+// View Management
+function initializeViews() {
+    // All views start hidden, kanban is active by default
+    document.querySelectorAll('.view').forEach(view => {
+        view.classList.remove('active');
+    });
+    document.getElementById('view-kanban')?.classList.add('active');
+}
+
+function switchView(viewName) {
+    // Update sidebar active state with animation
+    document.querySelectorAll('.sidebar-item').forEach(item => {
+        item.classList.remove('active');
+    });
+    const activeItem = document.querySelector(`[data-view="${viewName}"]`);
+    if (activeItem) {
+        activeItem.classList.add('active');
+        // Animate active state
+        activeItem.style.transform = 'scale(0.98)';
+        setTimeout(() => {
+            activeItem.style.transform = '';
+        }, 150);
+    }
+    
+    // Update view visibility with fade transition
+    document.querySelectorAll('.view').forEach(view => {
+        if (view.classList.contains('active')) {
+            view.style.opacity = '0';
+            view.style.transform = 'translateY(10px)';
+            setTimeout(() => {
+                view.classList.remove('active');
+            }, 200);
+        }
+    });
+    
+    // Show new view with animation
+    setTimeout(() => {
+        const newView = document.getElementById(`view-${viewName}`);
+        if (newView) {
+            newView.classList.add('active');
+            newView.style.opacity = '0';
+            newView.style.transform = 'translateY(10px)';
+            requestAnimationFrame(() => {
+                newView.style.transition = 'opacity 0.4s ease, transform 0.4s ease';
+                newView.style.opacity = '1';
+                newView.style.transform = 'translateY(0)';
+            });
+        }
+    }, 200);
+    
+    currentView = viewName;
+    loadViewData(viewName);
+}
+
+function loadViewData(viewName) {
+    switch(viewName) {
+        case 'kanban':
+            loadKanban();
+            startRefresh('kanban', () => loadKanban(), 2000); // Refresh every 2 seconds for real-time updates
+            break;
+        case 'agents':
+            loadAgentTerminals();
+            startRefresh('agents', () => loadAgentTerminals(), 3000); // Refresh every 3 seconds for smooth updates
+            break;
+        case 'insights':
+            loadInsights();
+            startRefresh('insights', () => loadInsights(), 5000);
+            startRefresh('github-issues', () => loadGitHubIssues(), 10000);
+            break;
+        case 'roadmap':
+            loadRoadmap();
+            break;
+        case 'ideation':
+            loadIdeation();
+            break;
+        case 'changelog':
+            loadChangelog();
+            break;
+        case 'context':
+            loadContext();
+            startRefresh('context', () => loadContext(), 5000);
+            break;
+        case 'github-issues':
+            loadGitHubIssues();
+            startRefresh('github-issues', () => loadGitHubIssues(), 10000);
+            break;
+        case 'worktrees':
+            loadWorktrees();
+            startRefresh('worktrees', () => loadWorktrees(), 5000);
+            break;
+        case 'settings':
+            loadSettings();
+            break;
     }
 }
 
-// Load kanban board
-async function loadKanban(projectId) {
-    if (!projectId) return;
-    
-    currentProjectId = projectId;
+// Kanban Board
+async function loadKanban() {
+    if (!currentProjectId) {
+        const board = document.getElementById('kanban-board');
+        if (board) {
+            board.innerHTML = '<div class="empty-state"><h3>Select a project</h3><p>Choose a project from the sidebar to view the kanban board</p></div>';
+        }
+        return;
+    }
     
     try {
-        const response = await fetch(`${API_BASE}/projects/${projectId}/status`);
+        const response = await fetch(`${API_BASE}/projects/${currentProjectId}/status`);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
         const status = await response.json();
         
-        // Clear columns
-        ['pending', 'running', 'qa', 'completed', 'failed'].forEach(col => {
-            document.getElementById(`${col}-column`).innerHTML = '';
+        // Map old statuses to new columns with automatic state transitions
+        const tasks = status.tasks || [];
+        
+        // Enhanced task processing with progress calculation
+        const processedTasks = tasks.map(task => {
+            // Calculate progress based on status
+            let progress = 0;
+            if (task.status === 'pending') progress = 0;
+            else if (task.status === 'running') progress = 50;
+            else if (task.status === 'qa_running') progress = 75;
+            else if (task.status === 'completed' || task.status === 'qa_passed') progress = 100;
+            else if (task.status === 'failed') progress = 0;
+            
+            // Add timestamp if missing
+            if (!task.timestamp) {
+                task.timestamp = 'Just now';
+            }
+            
+            return { ...task, progress };
         });
         
-        // Populate columns
-        Object.keys(status.kanban).forEach(statusKey => {
-            const column = document.getElementById(`${statusKey}-column`);
-            const tasks = status.kanban[statusKey];
-            
-            if (tasks.length === 0) {
-                column.innerHTML = '<div class="empty-state" style="padding: 20px; color: #999;">No tasks</div>';
-            } else {
-                column.innerHTML = tasks.map(task => `
-                    <div class="task-card">
-                        <h4>${task.id}</h4>
-                        <p>${task.description || 'No description'}</p>
-                        <div class="task-meta">
-                            <span>${task.complexity || 'unknown'}</span>
-                            <span>${task.estimated_hours ? task.estimated_hours + 'h' : ''}</span>
-                        </div>
-                    </div>
-                `).join('');
+        // Map to new columns
+        const columnMapping = {
+            'planning': processedTasks.filter(t => t.status === 'pending'),
+            'in-progress': processedTasks.filter(t => t.status === 'running'),
+            'ai-review': processedTasks.filter(t => t.status === 'qa_running'),
+            'human-review': [], // Would be populated from human review status
+            'done': processedTasks.filter(t => t.status === 'completed' || t.status === 'qa_passed' || t.status === 'failed' || t.status === 'qa_failed')
+        };
+        
+        // Update column counts with smooth animation
+        Object.keys(columnMapping).forEach(column => {
+            const count = columnMapping[column].length;
+            const countEl = document.getElementById(`count-${column}`);
+            if (countEl) {
+                const oldCount = parseInt(countEl.textContent) || 0;
+                if (oldCount !== count) {
+                    // Animate count change with smooth transition
+                    countEl.style.transform = 'scale(1.3)';
+                    countEl.style.color = 'var(--text-primary-light)';
+                    setTimeout(() => {
+                        countEl.textContent = count;
+                        countEl.style.transform = 'scale(1)';
+                        setTimeout(() => {
+                            countEl.style.color = '';
+                        }, 300);
+                    }, 200);
+                } else {
+                    countEl.textContent = count;
+                }
             }
         });
         
-        // Start auto-refresh
-        if (refreshInterval) clearInterval(refreshInterval);
-        refreshInterval = setInterval(() => loadKanban(projectId), 3000);
+        // Render tasks in columns with smooth transition
+        Object.keys(columnMapping).forEach(column => {
+            const columnEl = document.getElementById(`${column}-column`);
+            if (!columnEl) return;
+            
+            const tasks = columnMapping[column];
+            const newContent = tasks.length === 0 
+                ? '<div class="empty-state" style="padding: 20px; color: #999; font-size: 0.875rem;">No tasks</div>'
+                : tasks.map(task => renderTaskCard(task)).join('');
+            
+            // Smooth update - fade out old, fade in new
+            if (columnEl.innerHTML !== newContent) {
+                columnEl.style.opacity = '0.7';
+                columnEl.style.transition = 'opacity 0.2s ease';
+                setTimeout(() => {
+                    columnEl.innerHTML = newContent;
+                    columnEl.style.opacity = '1';
+                }, 100);
+            }
+        });
+        
+        // Re-initialize drag-drop
+        initializeTaskDragDrop();
         
     } catch (error) {
         console.error('Error loading kanban:', error);
     }
 }
 
-// Load memory
-async function loadMemory(projectId) {
-    if (!projectId) return;
+function renderTaskCard(task) {
+    const complexity = task.complexity || 'unknown';
+    const complexityColors = {
+        'simple': 'rgba(52, 199, 89, 0.15)',
+        'medium': 'rgba(255, 193, 7, 0.15)',
+        'high': 'rgba(255, 59, 48, 0.15)',
+        'unknown': 'rgba(142, 142, 147, 0.15)'
+    };
     
-    const container = document.getElementById('memory-content');
-    container.innerHTML = '<div class="loading">Loading memory...</div>';
+    const complexityLabels = {
+        'simple': 'Simple',
+        'medium': 'Medium',
+        'high': 'High',
+        'unknown': 'Unknown'
+    };
     
-    try {
-        const response = await fetch(`${API_BASE}/projects/${projectId}`);
-        const project = await response.json();
+    const statusColors = {
+        'pending': 'rgba(0, 122, 255, 1)',
+        'running': 'rgba(255, 193, 7, 1)',
+        'qa_running': 'rgba(88, 86, 214, 1)',
+        'completed': 'rgba(52, 199, 89, 1)',
+        'failed': 'rgba(255, 59, 48, 1)',
+        'qa_passed': 'rgba(52, 199, 89, 1)',
+        'qa_failed': 'rgba(255, 59, 48, 1)'
+    };
+    
+    const statusLabels = {
+        'pending': 'Pending',
+        'running': 'Running',
+        'qa_running': 'QA Running',
+        'completed': 'Completed',
+        'failed': 'Failed',
+        'qa_passed': 'QA Passed',
+        'qa_failed': 'QA Failed'
+    };
+    
+    const status = task.status || 'pending';
+    const statusColor = statusColors[status] || statusColors['pending'];
+    const complexityColor = complexityColors[complexity] || complexityColors['unknown'];
+    
+    // Calculate progress
+    let progress = task.progress || 0;
+    if (status === 'pending') progress = 0;
+    else if (status === 'running') progress = 50;
+    else if (status === 'qa_running') progress = 75;
+    else if (status === 'completed' || status === 'qa_passed') progress = 100;
+    else if (status === 'failed' || status === 'qa_failed') progress = 0;
+    
+    // Format timestamp
+    let timeDisplay = '';
+    if (task.started) {
+        const started = new Date(task.started * 1000);
+        const now = new Date();
+        const diffMs = now - started;
+        const diffMins = Math.floor(diffMs / 60000);
+        if (diffMins < 1) timeDisplay = 'Just now';
+        else if (diffMins < 60) timeDisplay = `${diffMins}m ago`;
+        else {
+            const diffHours = Math.floor(diffMins / 60);
+            timeDisplay = `${diffHours}h ago`;
+        }
+    } else if (task.timestamp) {
+        timeDisplay = task.timestamp;
+    } else {
+        timeDisplay = 'Just now';
+    }
+    
+    return `
+        <div class="task-card" data-task-id="${escapeHtml(task.id)}" data-status="${escapeHtml(status)}" draggable="true">
+            <div class="task-header">
+                <h4>${escapeHtml(task.title || task.id)}</h4>
+                <div class="task-badges">
+                    <span class="task-complexity" style="background: ${complexityColor}; border: 1px solid ${complexityColor.replace('0.15', '0.3')}">${escapeHtml(complexityLabels[complexity])}</span>
+                </div>
+            </div>
+            <div class="task-body">
+                ${task.description ? `<p class="task-description">${escapeHtml(task.description.substring(0, 120))}${task.description.length > 120 ? '...' : ''}</p>` : ''}
+                <div class="task-progress-container">
+                    <div class="task-progress">
+                        <div class="progress-bar" style="width: ${progress}%; background: ${statusColor}; opacity: 0.8"></div>
+                    </div>
+                    <span class="progress-text">${progress}%</span>
+                </div>
+            </div>
+            <div class="task-footer">
+                <div class="task-status-info">
+                    <span class="status-dot" style="background: ${statusColor}"></span>
+                    <span class="task-status" style="color: ${statusColor}">${escapeHtml(statusLabels[status])}</span>
+                </div>
+                ${timeDisplay ? `<span class="task-time">${timeDisplay}</span>` : ''}
+            </div>
+            ${task.status === 'running' ? `
+                <div class="task-actions">
+                    <button class="btn-view-logs" onclick="viewTaskLogs('${escapeHtml(task.id)}')">
+                        <img src="https://unpkg.com/lucide-static@latest/icons/terminal.svg" alt="Logs" class="btn-icon-small">
+                        View Logs
+                    </button>
+                </div>
+            ` : ''}
+            ${task.status === 'qa_running' ? `
+                <div class="task-actions">
+                    <span class="qa-indicator">
+                        <span class="status-dot running"></span>
+                        QA in progress...
+                    </span>
+                </div>
+            ` : ''}
+        </div>
+    `;
+}
+
+function getTaskBadges(task) {
+    const badges = [];
+    if (task.needs_review) badges.push('<span class="task-badge needs-review">Needs Review</span>');
+    if (task.status === 'completed') badges.push('<span class="task-badge completed">Completed</span>');
+    if (task.high_impact) badges.push('<span class="task-badge high-impact">High Impact</span>');
+    if (task.performance) badges.push('<span class="task-badge performance">Performance</span>');
+    return badges.join('');
+}
+
+function getTaskCardClass(task) {
+    if (task.status === 'running') return 'running';
+    if (task.status === 'completed' || task.status === 'qa_passed') return 'completed';
+    if (task.status === 'failed' || task.status === 'qa_failed') return 'failed';
+    return '';
+}
+
+// Drag and Drop
+function initializeDragDrop() {
+    // Will be called after tasks are rendered
+}
+
+function initializeTaskDragDrop() {
+    const taskCards = document.querySelectorAll('.task-card');
+    const columns = document.querySelectorAll('.kanban-column');
+    
+    taskCards.forEach(card => {
+        card.addEventListener('dragstart', (e) => {
+            draggedTask = card;
+            card.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+        });
         
-        if (!project.memory || Object.keys(project.memory).length === 0) {
-            container.innerHTML = '<div class="empty-state"><h3>No memory yet</h3><p>Complete some tasks to build memory</p></div>';
+        card.addEventListener('dragend', () => {
+            card.classList.remove('dragging');
+            draggedTask = null;
+        });
+    });
+    
+    columns.forEach(column => {
+        const columnContent = column.querySelector('.column-content');
+        
+        column.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            columnContent.classList.add('drag-over');
+        });
+        
+        column.addEventListener('dragleave', () => {
+            columnContent.classList.remove('drag-over');
+        });
+        
+        column.addEventListener('drop', (e) => {
+            e.preventDefault();
+            columnContent.classList.remove('drag-over');
+            
+            if (draggedTask) {
+                const taskId = draggedTask.dataset.taskId;
+                const newColumn = column.dataset.column;
+                
+                // Animate task movement
+                draggedTask.style.opacity = '0.5';
+                draggedTask.style.transform = 'scale(0.95)';
+                
+                setTimeout(() => {
+                    // Move task visually
+                    columnContent.appendChild(draggedTask);
+                    
+                    // Animate back
+                    draggedTask.style.transition = 'all 0.3s ease';
+                    draggedTask.style.opacity = '1';
+                    draggedTask.style.transform = 'scale(1)';
+                    
+                    // Update task status (would call API in real implementation)
+                    updateTaskStatus(taskId, newColumn);
+                }, 100);
+            }
+        });
+    });
+}
+
+async function updateTaskStatus(taskId, newColumn) {
+    // Map column to status
+    const statusMap = {
+        'planning': 'pending',
+        'in-progress': 'running',
+        'ai-review': 'qa_running',
+        'human-review': 'qa_running',
+        'done': 'completed'
+    };
+    
+    const newStatus = statusMap[newColumn] || 'pending';
+    
+    // In a real implementation, this would call the API
+    console.log(`Updating task ${taskId} to status ${newStatus}`);
+}
+
+// Agent Terminals - with smooth updates
+let agentLogIntervals = {};
+
+async function loadAgentTerminals() {
+    try {
+        // Get agents for current project if available, otherwise all agents
+        let agents = [];
+        if (currentProjectId) {
+            try {
+                const projectResponse = await fetch(`${API_BASE}/projects/${currentProjectId}/agents`);
+                if (projectResponse.ok) {
+                    agents = await projectResponse.json();
+                }
+            } catch (e) {
+                // Fallback to all agents
+            }
+        }
+        
+        // Fallback to all agents if project agents empty
+        if (agents.length === 0) {
+            const response = await fetch(`${API_BASE}/agents`);
+            agents = await response.json();
+        }
+        
+        const container = document.getElementById('agents-terminals');
+        if (!container) return;
+        
+        if (agents.length === 0) {
+            smoothUpdate(container, '<div class="empty-state"><h3>No agents running</h3><p>Start a project to see agents in action</p></div>');
             return;
         }
         
-        const memory = project.memory;
-        container.innerHTML = `
-            <div class="memory-section">
-                <h3>Successful Patterns</h3>
-                ${(memory.successful_patterns || []).map(p => `<div class="memory-item">${p}</div>`).join('') || '<p>No patterns yet</p>'}
-            </div>
-            <div class="memory-section">
-                <h3>Project Type</h3>
-                <div class="memory-item">${memory.project_type || 'Not detected'}</div>
-            </div>
-            <div class="memory-section">
-                <h3>Tech Stack</h3>
-                ${(memory.tech_stack || []).map(t => `<div class="memory-item">${t}</div>`).join('') || '<p>Not detected</p>'}
-            </div>
-            <div class="memory-section">
-                <h3>Statistics</h3>
-                <div class="memory-item">Total Successful Builds: ${memory.total_successful_builds || 0}</div>
-            </div>
-        `;
-    } catch (error) {
-        container.innerHTML = `<div class="empty-state"><h3>Error</h3><p>${error.message}</p></div>`;
-    }
-}
-
-// Project select handlers
-document.getElementById('project-select').addEventListener('change', (e) => {
-    loadKanban(e.target.value);
-});
-
-document.getElementById('memory-project-select').addEventListener('change', (e) => {
-    loadMemory(e.target.value);
-});
-
-// New project modal
-document.getElementById('new-project-btn').addEventListener('click', () => {
-    document.getElementById('new-project-modal').style.display = 'block';
-});
-
-document.getElementById('new-project-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const path = document.getElementById('project-path').value;
-    const id = document.getElementById('project-id').value;
-    
-    try {
-        const response = await fetch(`${API_BASE}/projects`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path, id })
+        // Only update if agents changed (prevent full refresh)
+        const currentAgentIds = Array.from(container.querySelectorAll('.agent-terminal')).map(el => el.dataset.agentId);
+        const newAgentIds = agents.map(a => a.id);
+        
+        // Update existing terminals or add new ones
+        agents.forEach(agent => {
+            let terminalEl = container.querySelector(`[data-agent-id="${agent.id}"]`);
+            if (!terminalEl) {
+                // Add new terminal
+                container.insertAdjacentHTML('beforeend', renderAgentTerminal(agent));
+                terminalEl = container.querySelector(`[data-agent-id="${agent.id}"]`);
+            }
+            
+            // Update status
+            const statusEl = terminalEl.querySelector('.agent-status');
+            if (statusEl) {
+                const statusClass = agent.status === 'running' ? 'running' : 
+                                   agent.status === 'completed' ? 'idle' :
+                                   agent.status === 'failed' ? 'error' : 'waiting';
+                statusEl.innerHTML = `
+                    <span class="status-dot ${statusClass}"></span>
+                    <span>${escapeHtml(agent.status_text || agent.status)}</span>
+                `;
+            }
         });
         
-        if (response.ok) {
-            document.getElementById('new-project-modal').style.display = 'none';
-            loadProjects();
-        } else {
-            const error = await response.json();
-            alert('Error: ' + error.error);
-        }
-    } catch (error) {
-        alert('Error: ' + error.message);
-    }
-});
-
-// Plan modal
-function createPlan(projectId) {
-    currentProjectId = projectId;
-    document.getElementById('plan-modal').style.display = 'block';
-    document.getElementById('plan-form').dataset.projectId = projectId;
-}
-
-document.getElementById('plan-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const projectId = e.target.dataset.projectId;
-    const goal = document.getElementById('plan-goal').value;
-    
-    try {
-        const response = await fetch(`${API_BASE}/projects/${projectId}/plan`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ goal })
+        // Remove terminals for agents that are no longer running
+        currentAgentIds.forEach(agentId => {
+            if (!newAgentIds.includes(agentId)) {
+                const terminalEl = container.querySelector(`[data-agent-id="${agentId}"]`);
+                if (terminalEl) {
+                    terminalEl.remove();
+                    // Clear interval
+                    if (agentLogIntervals[agentId]) {
+                        clearInterval(agentLogIntervals[agentId]);
+                        delete agentLogIntervals[agentId];
+                    }
+                }
+            }
         });
         
-        if (response.ok) {
-            document.getElementById('plan-modal').style.display = 'none';
-            document.getElementById('plan-goal').value = '';
-            alert('Plan created successfully!');
-            loadProjects();
-        } else {
-            const error = await response.json();
-            alert('Error: ' + error.error);
-        }
-    } catch (error) {
-        alert('Error: ' + error.message);
-    }
-});
-
-// Start project
-async function startProject(projectId) {
-    if (!confirm('Start execution for this project?')) return;
-    
-    try {
-        const response = await fetch(`${API_BASE}/projects/${projectId}/start`, {
-            method: 'POST'
+        // Load/update terminal logs for each agent (with auto-refresh)
+        agents.forEach(agent => {
+            // Load immediately
+            if (currentProjectId) {
+                loadAgentLogsFromAPI(currentProjectId, agent.id);
+            }
+            
+            // Set up auto-refresh for running agents
+            if (agent.status === 'running') {
+                if (!agentLogIntervals[agent.id]) {
+                    agentLogIntervals[agent.id] = setInterval(() => {
+                        if (currentProjectId) {
+                            loadAgentLogsFromAPI(currentProjectId, agent.id);
+                        }
+                    }, 2000); // Refresh every 2 seconds
+                }
+            } else {
+                // Stop refreshing for non-running agents
+                if (agentLogIntervals[agent.id]) {
+                    clearInterval(agentLogIntervals[agent.id]);
+                    delete agentLogIntervals[agent.id];
+                }
+            }
         });
         
-        if (response.ok) {
-            alert('Execution started!');
-            viewKanban(projectId);
-        } else {
-            const error = await response.json();
-            alert('Error: ' + error.error);
-        }
     } catch (error) {
-        alert('Error: ' + error.message);
+        console.error('Error loading agents:', error);
     }
 }
 
-// View kanban
-function viewKanban(projectId) {
-    switchTab('kanban');
-    document.getElementById('project-select').value = projectId;
-    loadKanban(projectId);
+async function loadAgentLogsFromAPI(projectId, agentId) {
+    const terminalEl = document.getElementById(`terminal-${agentId}`);
+    if (!terminalEl) return;
+    
+    try {
+        const response = await fetch(`${API_BASE}/projects/${projectId}/agent-logs/${agentId}`);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        const data = await response.json();
+        
+        if (data.logs && data.logs.length > 0) {
+            // Smooth update - only change if content is different
+            const newContent = data.logs.map(log => 
+                `<div class="log-line ${log.type || 'info'}">${escapeHtml(log.message || log)}</div>`
+            ).join('');
+            
+            const wasAtBottom = terminalEl.scrollHeight - terminalEl.scrollTop < terminalEl.clientHeight + 100;
+            
+            terminalEl.innerHTML = newContent;
+            
+            // Auto-scroll to bottom if user was already at bottom
+            if (wasAtBottom) {
+                requestAnimationFrame(() => {
+                    terminalEl.scrollTop = terminalEl.scrollHeight;
+                });
+            }
+        } else if (terminalEl.innerHTML.includes('Loading logs')) {
+            terminalEl.innerHTML = '<div class="log-line info">No logs available yet. Agent may still be starting...</div>';
+        }
+    } catch (error) {
+        console.error('Error loading agent logs:', error);
+        if (terminalEl.innerHTML.includes('Loading logs') || terminalEl.innerHTML.includes('No logs')) {
+            terminalEl.innerHTML = `<div class="log-line error">Error loading logs: ${escapeHtml(error.message)}</div>`;
+        }
+    }
 }
 
-// Refresh button
-document.getElementById('refresh-btn').addEventListener('click', () => {
+function renderAgentTerminal(agent) {
+    const statusClass = agent.status === 'running' ? 'running' : 
+                       agent.status === 'completed' ? 'idle' :
+                       agent.status === 'failed' ? 'error' : 'waiting';
+    
+    // Clean up agent ID for display (remove project prefix if present)
+    let displayId = agent.id;
+    if (currentProjectId && displayId.startsWith(`${currentProjectId}-`)) {
+        displayId = displayId.substring(currentProjectId.length + 1);
+    }
+    
+    return `
+        <div class="agent-terminal" data-agent-id="${escapeHtml(agent.id)}">
+            <div class="agent-terminal-header">
+                <div class="agent-terminal-title">
+                    <h3>${escapeHtml(displayId)}</h3>
+                    ${agent.last_update ? `<span class="agent-last-update" title="${escapeHtml(agent.last_update)}">${escapeHtml(agent.last_update.substring(0, 50))}...</span>` : ''}
+                </div>
+                <div class="agent-status">
+                    <span class="status-dot ${statusClass}"></span>
+                    <span>${escapeHtml(agent.status_text || agent.status)}</span>
+                </div>
+            </div>
+            <div class="agent-terminal-output" id="terminal-${escapeHtml(agent.id)}">
+                <div class="log-line info">Loading logs...</div>
+            </div>
+        </div>
+    `;
+}
+
+async function loadAgentLogs(agentId, logPath) {
+    // Try to load logs via API first
     if (currentProjectId) {
-        loadKanban(currentProjectId);
+        await loadAgentLogsFromAPI(currentProjectId, agentId);
+    } else {
+        // Fallback: show error message
+        const terminalEl = document.getElementById(`terminal-${agentId}`);
+        if (terminalEl) {
+            terminalEl.innerHTML = '<div class="log-line error">No project selected. Select a project to view logs.</div>';
+        }
     }
-});
+}
 
-// Close modals
-document.querySelectorAll('.close').forEach(close => {
-    close.addEventListener('click', () => {
-        close.closest('.modal').style.display = 'none';
-    });
-});
-
-// Close modal on outside click
-window.addEventListener('click', (e) => {
-    if (e.target.classList.contains('modal')) {
-        e.target.style.display = 'none';
-    }
-});
-
-// Load projects for memory select
-async function loadProjectsForMemory() {
-    const select = document.getElementById('memory-project-select');
+// Insights
+async function loadInsights() {
+    const container = document.getElementById('insights-content');
+    if (!container) return;
     
+    if (!currentProjectId) {
+        container.innerHTML = '<div class="empty-state"><h3>Select a project</h3><p>Choose a project to view insights</p></div>';
+        return;
+    }
+    
+    try {
+        // Try to get insights from dedicated endpoint
+        let insights;
+        try {
+            const insightsResponse = await fetch(`${API_BASE}/projects/${currentProjectId}/insights`);
+            if (insightsResponse.ok) {
+                insights = await insightsResponse.json();
+            } else {
+                throw new Error('Insights endpoint failed');
+            }
+        } catch (e) {
+            // Fallback to status endpoint
+            const response = await fetch(`${API_BASE}/projects/${currentProjectId}/status`);
+            const status = await response.json();
+            
+            const tasks = status.tasks || [];
+            const completed = tasks.filter(t => t.status === 'completed' || t.status === 'qa_passed').length;
+            const total = tasks.length;
+            const successRate = total > 0 ? Math.round((completed / total) * 100) : 0;
+            const running = tasks.filter(t => t.status === 'running').length;
+            const agentUtil = total > 0 ? Math.round((running / total) * 100) : 0;
+            const failed = tasks.filter(t => t.status === 'failed' || t.status === 'qa_failed').length;
+            const failureRate = total > 0 ? Math.round((failed / total) * 100) : 0;
+            
+            insights = {
+                tasks_completed: completed,
+                tasks_total: total,
+                success_rate: successRate,
+                agent_utilization: agentUtil,
+                failure_rate: failureRate,
+                bottlenecks: running > 0 ? 'AI Review' : 'None',
+                avg_execution_time: 'N/A'
+            };
+        }
+        
+        // Update insight values - ensure elements exist
+        const tasksCompletedEl = document.getElementById('insight-tasks-completed');
+        const successRateEl = document.getElementById('insight-success-rate');
+        const agentUtilEl = document.getElementById('insight-agent-util');
+        const bottlenecksEl = document.getElementById('insight-bottlenecks');
+        const avgTimeEl = document.getElementById('insight-avg-time');
+        
+        if (tasksCompletedEl) {
+            tasksCompletedEl.textContent = insights.tasks_completed || 0;
+            // Add total if available
+            if (insights.tasks_total !== undefined && insights.tasks_total > 0) {
+                const parent = tasksCompletedEl.parentElement;
+                let totalSpan = parent.querySelector('.insight-total');
+                if (!totalSpan) {
+                    totalSpan = document.createElement('div');
+                    totalSpan.className = 'insight-total';
+                    totalSpan.style.fontSize = '12px';
+                    totalSpan.style.color = 'var(--text-secondary-light)';
+                    totalSpan.style.marginTop = '4px';
+                    parent.appendChild(totalSpan);
+                }
+                totalSpan.textContent = `of ${insights.tasks_total} total`;
+            }
+        }
+        
+        if (successRateEl) successRateEl.textContent = `${insights.success_rate || 0}%`;
+        if (agentUtilEl) agentUtilEl.textContent = `${insights.agent_utilization || 0}%`;
+        if (bottlenecksEl) bottlenecksEl.textContent = insights.bottlenecks || 'None';
+        if (avgTimeEl) avgTimeEl.textContent = insights.avg_execution_time || 'N/A';
+        
+        // Insights view updates individual elements, not innerHTML - no smoothUpdate needed here
+    } catch (error) {
+        console.error('Error loading insights:', error);
+        smoothUpdate(container, `<div class="empty-state"><h3>Error loading insights</h3><p>${escapeHtml(error.message)}</p></div>`);
+    }
+}
+
+// Roadmap
+async function loadRoadmap() {
+    if (!currentProjectId) {
+        document.getElementById('roadmap-content').innerHTML = '<div class="empty-state"><h3>Select a project</h3><p>Choose a project to view roadmap</p></div>';
+        return;
+    }
+    
+    try {
+        // Try to load roadmap from API
+        const response = await fetch(`${API_BASE}/projects/${currentProjectId}/roadmap`);
+        let roadmap;
+        if (response.ok) {
+            roadmap = await response.json();
+        } else {
+            // Fallback to placeholder
+            roadmap = {
+                'must-have': [],
+                'should-have': [],
+                'could-have': [],
+                'wont-have': []
+            };
+        }
+        
+    Object.keys(roadmap).forEach(category => {
+        const container = document.getElementById(`roadmap-${category}`);
+        if (!container) return;
+            
+            const items = roadmap[category] || [];
+            if (items.length === 0) {
+                container.innerHTML = '<div class="empty-state" style="padding: 20px;"><p>No items</p></div>';
+            } else {
+                container.innerHTML = items.map(item => `
+                    <div class="roadmap-item">
+                        <h4>${escapeHtml(item.name || item.title || 'Untitled')}</h4>
+                        ${item.description ? `<p>${escapeHtml(item.description)}</p>` : ''}
+                        <div class="roadmap-item-meta">
+                            ${item.impact ? `<span class="roadmap-impact">${escapeHtml(item.impact)} impact</span>` : ''}
+                            ${item.priority ? `<span class="roadmap-impact">${escapeHtml(item.priority)}</span>` : ''}
+                        </div>
+                    </div>
+                `).join('');
+            }
+        });
+    } catch (error) {
+        console.error('Error loading roadmap:', error);
+    }
+}
+
+// Context & Memory
+async function loadContext() {
+    if (!currentProjectId) {
+        document.getElementById('context-content').innerHTML = '<div class="empty-state"><h3>Select a project</h3><p>Choose a project to view context</p></div>';
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${API_BASE}/projects/${currentProjectId}`);
+        const project = await response.json();
+        
+        const memory = project.memory || {};
+        const status = project.kanban || {};
+        
+        // Build context display
+        let contextHtml = '<div class="context-section">';
+        contextHtml += `<h3>Project Path</h3><p>${escapeHtml(project.path || 'No path')}</p>`;
+        contextHtml += '</div>';
+        
+        if (Object.keys(memory).length > 0) {
+            contextHtml += '<div class="context-section">';
+            contextHtml += '<h3>Memory</h3>';
+            contextHtml += `<pre class="context-memory">${escapeHtml(JSON.stringify(memory, null, 2))}</pre>`;
+            contextHtml += '</div>';
+        }
+        
+        // Recent decisions from completed tasks
+        const completed = (status.completed || []).slice(0, 5);
+        if (completed.length > 0) {
+            contextHtml += '<div class="context-section">';
+            contextHtml += '<h3>Recent Decisions</h3>';
+            contextHtml += '<ul class="context-list">';
+            completed.forEach(task => {
+                contextHtml += `<li>${escapeHtml(task.title || task.id)} - ${escapeHtml(task.status)}</li>`;
+            });
+            contextHtml += '</ul>';
+            contextHtml += '</div>';
+        }
+        
+        // Task summary
+        const total = (status.pending || []).length + (status.running || []).length + (status.completed || []).length;
+        if (total > 0) {
+            contextHtml += '<div class="context-section">';
+            contextHtml += '<h3>Task Summary</h3>';
+            contextHtml += `<p>Total: ${total} | Running: ${(status.running || []).length} | Completed: ${(status.completed || []).length}</p>`;
+            contextHtml += '</div>';
+        }
+        
+        const container = document.getElementById('context-content');
+        if (container) {
+            container.innerHTML = contextHtml || '<div class="empty-state"><p>No context available</p></div>';
+        }
+        
+    } catch (error) {
+        console.error('Error loading context:', error);
+    }
+}
+
+// Other Views
+async function loadIdeation() {
+    if (!currentProjectId) {
+        document.getElementById('ideation-content').innerHTML = '<div class="empty-state"><h3>Select a project</h3><p>Choose a project to view ideation</p></div>';
+        return;
+    }
+    
+    try {
+        // Get project status to generate ideas from tasks
+        const response = await fetch(`${API_BASE}/projects/${currentProjectId}/status`);
+        const status = await response.json();
+        
+        const tasks = status.tasks || [];
+        const pending = tasks.filter(t => t.status === 'pending');
+        const ideas = [];
+        
+        // Generate ideas from pending tasks
+        pending.forEach(task => {
+            ideas.push({
+                title: task.title || task.id,
+                description: task.description || 'No description',
+                priority: task.complexity === 'high' ? 'High' : task.complexity === 'medium' ? 'Medium' : 'Low',
+                status: 'pending'
+            });
+        });
+        
+        const container = document.getElementById('ideation-content');
+        if (!container) return;
+        
+        if (ideas.length === 0) {
+            container.innerHTML = '<div class="empty-state"><h3>No ideas yet</h3><p>Ideas will appear here based on pending tasks</p></div>';
+        } else {
+            container.innerHTML = ideas.map(idea => `
+                <div class="ideation-item">
+                    <h4>${escapeHtml(idea.title)}</h4>
+                    <p>${escapeHtml(idea.description)}</p>
+                    <div class="ideation-meta">
+                        <span class="ideation-priority ${idea.priority.toLowerCase()}">${escapeHtml(idea.priority)} Priority</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+    } catch (error) {
+        console.error('Error loading ideation:', error);
+    }
+}
+
+async function loadChangelog() {
+    const timeline = document.getElementById('changelog-timeline');
+    if (!timeline) return;
+    
+    if (!currentProjectId) {
+        timeline.innerHTML = '<div class="empty-state"><h3>Select a project</h3><p>Choose a project to view changelog</p></div>';
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${API_BASE}/projects/${currentProjectId}/changelog`);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        const changelog = await response.json();
+        
+        const newContent = (!changelog || changelog.length === 0)
+            ? '<div class="empty-state"><h3>No changelog entries</h3><p>Changelog will appear here as tasks are completed</p></div>'
+            : changelog.map(entry => {
+                const date = new Date(entry.date || Date.now());
+                const dateStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+                const typeClass = entry.type || 'feature';
+                const statusBadge = entry.status ? `<span class="changelog-status ${entry.status}">${escapeHtml(entry.status)}</span>` : '';
+                return `
+                    <div class="changelog-entry ${typeClass}">
+                        <div class="changelog-date">${escapeHtml(dateStr)} ${statusBadge}</div>
+                        <div class="changelog-content">
+                            <h4>${escapeHtml(entry.title || 'Update')}</h4>
+                            ${entry.description ? `<p>${escapeHtml(entry.description)}</p>` : ''}
+                            ${entry.task_id ? `<div class="changelog-task-id">Task: ${escapeHtml(entry.task_id)}</div>` : ''}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        smoothUpdate(timeline, newContent);
+    } catch (error) {
+        console.error('Error loading changelog:', error);
+        smoothUpdate(timeline, `<div class="empty-state"><h3>Error loading changelog</h3><p>${escapeHtml(error.message)}</p></div>`);
+    }
+}
+
+async function loadGitHubIssues() {
+    const container = document.getElementById('github-issues-content');
+    if (!container) return;
+    
+    try {
+        const response = await fetch(`${API_BASE}/github/issues`);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        const issues = await response.json();
+        
+        const newContent = (!issues || issues.length === 0)
+            ? `
+                <div class="empty-state">
+                    <h3>No issues found</h3>
+                    <p>Issues from <a href="https://github.com/ethanstoner/auto-cursor" target="_blank">ethanstoner/auto-cursor</a> will appear here</p>
+                </div>
+            `
+            : `
+                <div class="github-issues-list">
+                    ${issues.map(issue => `
+                        <div class="github-issue-item ${issue.state}">
+                            <div class="issue-header">
+                                <h4>
+                                    <a href="${escapeHtml(issue.html_url)}" target="_blank">${escapeHtml(issue.title)}</a>
+                                    ${issue.state === 'open' ? '<span class="issue-badge open">Open</span>' : '<span class="issue-badge closed">Closed</span>'}
+                                </h4>
+                                <span class="issue-number">#${issue.number}</span>
+                            </div>
+                            ${issue.body ? `<p class="issue-body">${escapeHtml(issue.body.substring(0, 200))}${issue.body.length > 200 ? '...' : ''}</p>` : ''}
+                            <div class="issue-meta">
+                                <span>${escapeHtml(issue.user?.login || 'Unknown')}</span>
+                                <span>${new Date(issue.created_at).toLocaleDateString()}</span>
+                                ${issue.labels && issue.labels.length > 0 ? `
+                                    <div class="issue-labels">
+                                        ${issue.labels.map(label => `<span class="issue-label" style="background: #${label.color || '666'}">${escapeHtml(label.name)}</span>`).join('')}
+                                    </div>
+                                ` : ''}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        smoothUpdate(container, newContent);
+    } catch (error) {
+        console.error('Error loading GitHub issues:', error);
+        smoothUpdate(container, `
+            <div class="empty-state">
+                <h3>Error loading issues</h3>
+                <p>${escapeHtml(error.message)}</p>
+                <p><a href="https://github.com/ethanstoner/auto-cursor/issues" target="_blank">View on GitHub</a></p>
+            </div>
+        `);
+    }
+}
+
+async function loadWorktrees() {
+    if (!currentProjectId) {
+        const list = document.getElementById('worktrees-list');
+        if (list) {
+            list.innerHTML = '<div class="empty-state"><h3>Select a project</h3><p>Choose a project to view worktrees</p></div>';
+        }
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${API_BASE}/projects/${currentProjectId}/worktrees`);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        const worktrees = await response.json();
+        
+        const list = document.getElementById('worktrees-list');
+        if (!list) return;
+        
+        const newContent = (!worktrees || worktrees.length === 0)
+            ? '<div class="empty-state"><h3>No worktrees</h3><p>Worktrees will appear here when tasks are running</p></div>'
+            : worktrees.map(wt => {
+                const date = new Date(wt.created || Date.now());
+                const dateStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+                // Extract task ID from worktree name (e.g., "auto-cursor-auto-cursor-web-web-1" -> "web-1")
+                let taskId = wt.task_id || wt.id;
+                // Extract task ID from worktree name
+                // Format: auto-cursor-auto-cursor-web-web-1 -> web-1
+                if (taskId && taskId.includes('-')) {
+                    const parts = taskId.split('-');
+                    // Look for pattern like "web-1", "web-2" in the parts
+                    for (let i = parts.length - 1; i >= 0; i--) {
+                        if (/^[a-z]+-\d+$/.test(parts[i])) {
+                            taskId = parts[i];
+                            break;
+                        }
+                    }
+                    // If not found, try to extract from end
+                    if (taskId === wt.task_id || taskId === wt.id) {
+                        const lastParts = parts.slice(-2);
+                        if (lastParts.length === 2 && /^\d+$/.test(lastParts[1])) {
+                            taskId = `${lastParts[0]}-${lastParts[1]}`;
+                        }
+                    }
+                }
+                return `
+                    <div class="worktree-item">
+                        <div class="worktree-header">
+                            <h4>${escapeHtml(taskId)}</h4>
+                            <span class="worktree-branch">${escapeHtml(wt.branch || 'unknown')}</span>
+                        </div>
+                        <div class="worktree-meta">
+                            <span>Created: ${escapeHtml(dateStr)}</span>
+                            <span class="worktree-path">${escapeHtml(wt.path || '')}</span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        
+        smoothUpdate(list, newContent);
+    } catch (error) {
+        console.error('Error loading worktrees:', error);
+        const list = document.getElementById('worktrees-list');
+        if (list) {
+            smoothUpdate(list, `<div class="empty-state"><h3>Error loading worktrees</h3><p>${escapeHtml(error.message)}</p></div>`);
+        }
+    }
+}
+
+function loadSettings() {
+    // Load settings from localStorage or API
+    const refreshInterval = localStorage.getItem('refreshInterval') || '3';
+    const defaultProject = localStorage.getItem('defaultProject') || '';
+    
+    const intervalInput = document.getElementById('setting-refresh-interval');
+    if (intervalInput) intervalInput.value = refreshInterval;
+    
+    // Load projects for default project select
+    loadProjectsForSettings();
+}
+
+async function loadProjectsForSettings() {
     try {
         const response = await fetch(`${API_BASE}/projects`);
         const projects = await response.json();
         
-        select.innerHTML = '<option value="">Select a project...</option>' +
-            projects.map(p => `<option value="${p.id}">${p.id}</option>`).join('');
+        const select = document.getElementById('setting-default-project');
+        if (select) {
+            select.innerHTML = '<option value="">None</option>' +
+                projects.map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.id)}</option>`).join('');
+        }
     } catch (error) {
-        console.error('Error loading projects:', error);
+        console.error('Error loading projects for settings:', error);
     }
 }
 
-// Initial load
-loadProjects();
-loadProjectsForSelect();
-loadProjectsForMemory();
+// Modals
+function initializeModals() {
+    // Close buttons
+    document.querySelectorAll('.close').forEach(close => {
+        close.addEventListener('click', () => {
+            close.closest('.modal').style.display = 'none';
+        });
+    });
+    
+    // Close on outside click
+    document.querySelectorAll('.modal').forEach(modal => {
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                modal.style.display = 'none';
+            }
+        });
+    });
+    
+    // New project form
+    document.getElementById('new-project-form')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const path = document.getElementById('project-path').value;
+        const id = document.getElementById('project-id').value;
+        
+        try {
+            const response = await fetch(`${API_BASE}/projects`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path, id })
+            });
+            
+            if (response.ok) {
+                document.getElementById('new-project-modal').style.display = 'none';
+                loadProjectsForSidebar();
+                if (!currentProjectId) {
+                    currentProjectId = id;
+                    document.getElementById('sidebar-project-select').value = id;
+                    loadViewData(currentView);
+                }
+            } else {
+                const error = await response.json();
+                alert('Error: ' + error.error);
+            }
+        } catch (error) {
+            alert('Error: ' + error.message);
+        }
+    });
+    
+    // Plan form
+    document.getElementById('plan-form')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const goal = document.getElementById('plan-goal').value;
+        
+        if (!currentProjectId || !goal) {
+            alert('Please select a project and provide a goal');
+            return;
+        }
+        
+        const submitBtn = e.target.querySelector('button[type="submit"]');
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Creating...';
+        
+        try {
+            const response = await fetch(`${API_BASE}/projects/${currentProjectId}/plan`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ goal })
+            });
+            
+            if (response.ok) {
+                document.getElementById('plan-modal').style.display = 'none';
+                document.getElementById('plan-goal').value = '';
+                loadKanban();
+            } else {
+                const error = await response.json();
+                alert('Error: ' + error.error);
+            }
+        } catch (error) {
+            alert('Error: ' + error.message);
+        } finally {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Create Plan';
+        }
+    });
+    
+    // New task form
+    document.getElementById('new-task-form')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        // Placeholder - would create task via API
+        alert('Task creation will be implemented with backend API');
+        document.getElementById('new-task-modal').style.display = 'none';
+    });
+}
+
+// Project Management
+async function loadProjectsForSidebar() {
+    try {
+        console.log('📋 Loading projects from API...');
+        console.log(`API_BASE: ${API_BASE}`);
+        
+        // Use absolute URL to avoid any path issues
+        const apiUrl = `${API_BASE}/projects`;
+        console.log(`Fetching from: ${apiUrl}`);
+        
+        const response = await fetch(apiUrl, {
+            method: 'GET',
+            headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json'
+            },
+            cache: 'no-cache'
+        });
+        
+        console.log(`Response status: ${response.status}, ok: ${response.ok}, headers:`, response.headers);
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`❌ API error: ${response.status} - ${errorText}`);
+            throw new Error(`HTTP ${response.status}: ${errorText}`);
+        }
+        
+        const projects = await response.json();
+        console.log(`✅ API returned ${projects ? projects.length : 0} projects:`, projects);
+        
+        const select = document.getElementById('sidebar-project-select');
+        if (!select) {
+            console.error('❌ Project select element not found in DOM');
+            // Try again after a short delay
+            setTimeout(() => {
+                const retrySelect = document.getElementById('sidebar-project-select');
+                if (retrySelect) {
+                    console.log('✅ Found select element on retry');
+                    populateProjectSelect(retrySelect, projects);
+                } else {
+                    console.error('❌ Still not found after retry');
+                }
+            }, 100);
+            return;
+        }
+        
+        populateProjectSelect(select, projects);
+        
+    } catch (error) {
+        console.error('❌ Error loading projects:', error);
+        console.error('Error name:', error.name);
+        console.error('Error message:', error.message);
+        console.error('Error stack:', error.stack);
+        
+        const select = document.getElementById('sidebar-project-select');
+        if (select) {
+            select.innerHTML = '<option value="">Error loading projects (check console)</option>';
+        }
+    }
+}
+
+function populateProjectSelect(select, projects) {
+    // Clear existing options
+    select.innerHTML = '<option value="">Select project...</option>';
+    
+    // Add projects
+    if (projects && Array.isArray(projects) && projects.length > 0) {
+        projects.forEach((project, index) => {
+            const option = document.createElement('option');
+            const projectId = project.id || project.name || `project-${index}`;
+            const projectName = project.name || project.id || 'Unknown Project';
+            option.value = projectId;
+            option.textContent = projectName;
+            select.appendChild(option);
+            console.log(`   Added option: ${projectId} = ${projectName}`);
+        });
+        
+        // Set current project if available
+        if (currentProjectId) {
+            select.value = currentProjectId;
+            console.log(`   Set current project to: ${currentProjectId}`);
+        }
+        
+        console.log(`✅ Successfully loaded ${projects.length} projects into selector`);
+    } else {
+        // No projects found
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = 'No projects found';
+        option.disabled = true;
+        select.appendChild(option);
+        console.warn('⚠️ No projects found in API response (empty array or null)');
+    }
+}
+
+// Stats Management
+function updateStats(projects, agents, running, completed) {
+    console.log(`Updating stats: projects=${projects}, agents=${agents}, running=${running}, completed=${completed}`);
+    
+    const projectsEl = document.getElementById('stat-projects');
+    const agentsEl = document.getElementById('stat-agents');
+    const runningEl = document.getElementById('stat-running');
+    const completedEl = document.getElementById('stat-completed');
+    
+    if (projectsEl) {
+        projectsEl.textContent = projects !== null && projects !== undefined ? projects : '-';
+        console.log(`✅ Set stat-projects to: ${projectsEl.textContent}`);
+    } else {
+        console.error('❌ stat-projects element not found');
+    }
+    
+    if (agentsEl) {
+        agentsEl.textContent = agents !== null && agents !== undefined ? agents : '-';
+        console.log(`✅ Set stat-agents to: ${agentsEl.textContent}`);
+    } else {
+        console.error('❌ stat-agents element not found');
+    }
+    
+    if (runningEl) {
+        runningEl.textContent = running !== null && running !== undefined ? running : '-';
+        console.log(`✅ Set stat-running to: ${runningEl.textContent}`);
+    } else {
+        console.error('❌ stat-running element not found');
+    }
+    
+    if (completedEl) {
+        completedEl.textContent = completed !== null && completed !== undefined ? completed : '-';
+        console.log(`✅ Set stat-completed to: ${completedEl.textContent}`);
+    } else {
+        console.error('❌ stat-completed element not found');
+    }
+}
+
+async function refreshStats() {
+    try {
+        console.log('📊 Refreshing stats...');
+        const [projectsRes, agentsRes] = await Promise.all([
+            fetch(`${API_BASE}/projects`),
+            fetch(`${API_BASE}/agents`)
+        ]);
+        
+        if (!projectsRes.ok) {
+            throw new Error(`Projects API returned ${projectsRes.status}`);
+        }
+        if (!agentsRes.ok) {
+            throw new Error(`Agents API returned ${agentsRes.status}`);
+        }
+        
+        const projects = await projectsRes.json();
+        const agents = await agentsRes.json();
+        console.log(`✅ Loaded ${projects.length} projects, ${agents.length} agents`);
+        
+        const running = agents.filter(a => a.status === 'running').length;
+        const completed = agents.filter(a => a.status === 'completed').length;
+        
+        console.log(`Stats: ${projects.length} projects, ${agents.length} agents, ${running} running, ${completed} completed`);
+        updateStats(projects.length, agents.length, running, completed);
+    } catch (error) {
+        console.error('❌ Error refreshing stats:', error);
+        console.error('Error details:', error.stack);
+        // Set stats to 0 on error so user knows something is wrong
+        updateStats(0, 0, 0, 0);
+    }
+}
+
+// Refresh Management
+function startRefresh(name, callback, interval) {
+    stopRefresh(name);
+    // Call immediately, then set interval
+    try {
+        callback();
+    } catch (error) {
+        console.error(`Error in initial callback for ${name}:`, error);
+    }
+    refreshIntervals[name] = setInterval(() => {
+        try {
+            callback();
+        } catch (error) {
+            console.error(`Error in refresh for ${name}:`, error);
+        }
+    }, interval);
+}
+
+function stopRefresh(name) {
+    if (refreshIntervals[name]) {
+        clearInterval(refreshIntervals[name]);
+        delete refreshIntervals[name];
+    }
+}
+
+function startGlobalRefresh() {
+    // Refresh stats every 10 seconds
+    setInterval(refreshStats, 10000);
+    
+    // Initial load (async, but don't block)
+    refreshStats();
+    // Projects already loaded in loadInitialData, but refresh periodically
+    setInterval(() => {
+        loadProjectsForSidebar().catch(err => console.error('Error loading projects:', err));
+    }, 30000); // Refresh projects every 30 seconds
+}
+
+// Initial Data Load
+async function loadInitialData() {
+    console.log('📊 Loading initial data...');
+    try {
+        // Load projects first (await to ensure they're loaded)
+        console.log('Loading projects...');
+        await loadProjectsForSidebar();
+        console.log('Loading stats...');
+        await refreshStats();
+        console.log('✅ Initial data loaded');
+        
+        // Load current view
+        if (currentProjectId) {
+            console.log(`Loading view data for project: ${currentProjectId}`);
+            loadViewData(currentView);
+        }
+    } catch (error) {
+        console.error('❌ Error loading initial data:', error);
+    }
+}
+
+// Utility Functions
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function updateElement(id, content) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = content;
+}
+
+// Task Actions
+async function startTask(taskId) {
+    if (!currentProjectId) return;
+    
+    try {
+        const response = await fetch(`${API_BASE}/projects/${currentProjectId}/start`, {
+            method: 'POST'
+        });
+        
+        if (response.ok) {
+            loadKanban();
+            loadAgentTerminals();
+        } else {
+            const error = await response.json();
+            alert('Error: ' + error.error);
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+function viewTaskLogs(taskId) {
+    // Switch to agents view and highlight this agent
+    switchView('agents');
+    // Scroll to the agent terminal for this task
+    setTimeout(() => {
+        const agentTerminal = document.querySelector(`[data-agent-id="${taskId}"]`);
+        if (agentTerminal) {
+            agentTerminal.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            agentTerminal.style.border = '2px solid rgba(255, 193, 7, 0.8)';
+            setTimeout(() => {
+                agentTerminal.style.border = '';
+            }, 3000);
+        }
+    }, 500);
+}
+
+// Global functions for onclick handlers
+window.createPlan = function(projectId) {
+    currentProjectId = projectId;
+    document.getElementById('sidebar-project-select').value = projectId;
+    document.getElementById('plan-modal').style.display = 'block';
+};
+
+window.startProject = async function(projectId) {
+    currentProjectId = projectId;
+    document.getElementById('sidebar-project-select').value = projectId;
+    await startTask(null);
+};
+
+window.viewKanban = function(projectId) {
+    currentProjectId = projectId;
+    document.getElementById('sidebar-project-select').value = projectId;
+    switchView('kanban');
+};
+
+// Refresh buttons
+document.getElementById('refresh-kanban-btn')?.addEventListener('click', () => {
+    loadKanban();
+});
+
+document.getElementById('refresh-agents-btn')?.addEventListener('click', () => {
+    loadAgentTerminals();
+});
+
+// Roadmap view selector
+document.getElementById('roadmap-view-select')?.addEventListener('change', (e) => {
+    // Would filter roadmap by view type
+    console.log('Roadmap view:', e.target.value);
+});
+
+// Settings handlers
+document.getElementById('setting-refresh-interval')?.addEventListener('change', (e) => {
+    localStorage.setItem('refreshInterval', e.target.value);
+    // Restart refresh with new interval
+    if (refreshIntervals[currentView]) {
+        const callback = refreshIntervals[currentView].callback;
+        startRefresh(currentView, callback, parseInt(e.target.value) * 1000);
+    }
+});
+
+document.getElementById('setting-default-project')?.addEventListener('change', (e) => {
+    localStorage.setItem('defaultProject', e.target.value);
+});

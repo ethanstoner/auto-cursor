@@ -1,5 +1,40 @@
 # Auto-Cursor Web Interface
 
+## Installation
+
+### Prerequisites
+- Python 3.8 or higher
+- Flask and Flask-CORS installed
+- Auto-Cursor framework installed
+
+### Setup
+
+1. Install dependencies:
+```bash
+pip install flask flask-cors requests
+```
+
+2. Start the server:
+```bash
+python3 server.py
+```
+
+3. Open your browser to:
+```
+http://localhost:8765
+```
+
+### Configuration
+
+The server runs on port 8765 by default. To change the port, modify `DEFAULT_PORT` in `server.py`.
+
+## Usage
+
+1. Select a project from the dropdown in the sidebar
+2. View the kanban board to see task status
+3. Check agent terminals for real-time logs
+4. View insights and analytics for project metrics
+
 Web-based UI for Auto-Cursor, similar to Auto-Claude's desktop interface.
 
 ## Features

@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
 ### Added
+
 - **Memory Layer Integration** - Agents learn from past successful builds and use insights to create better plans
   - Automatic memory saving after successful builds (≥80% completion)
   - Memory context included in planning prompts
@@ -25,14 +27,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enhanced progress tracking with time estimates and progress bars
 - Detailed status view with `--detailed` flag
 
+
 ### Changed
+
 - Improved planning workflow with interactive mode
 - Enhanced monitoring with better progress visualization
 
+
 ### Fixed
+
 - N/A
 
 ## [1.0.0] - 2026-01-09
 
+
 ### Added
+
 - Initial public release
