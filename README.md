@@ -1,6 +1,6 @@
 <div align="center">
 
-![Auto-Cursor Logo](logo.png)
+![Auto-Cursor Logo](logo.svg)
 
 # Auto-Cursor
 

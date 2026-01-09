@@ -1,0 +1,15 @@
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background circle -->
+  <circle cx="100" cy="100" r="90" fill="#000" opacity="0.05"/>
+  
+  <!-- Cursor icon -->
+  <path d="M 60 60 L 60 140 L 100 120 L 140 140 L 140 60 Z" fill="none" stroke="#000" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 70 70 L 70 130 L 100 115 L 130 130 L 130 70 Z" fill="#000" opacity="0.1"/>
+  
+  <!-- Automation arrows -->
+  <path d="M 50 100 L 30 100 M 30 100 L 35 95 M 30 100 L 35 105" stroke="#000" stroke-width="3" stroke-linecap="round"/>
+  <path d="M 150 100 L 170 100 M 170 100 L 165 95 M 170 100 L 165 105" stroke="#000" stroke-width="3" stroke-linecap="round"/>
+  
+  <!-- Code brackets -->
+  <text x="100" y="110" font-family="monospace" font-size="24" font-weight="bold" fill="#000" text-anchor="middle">{ }</text>
+</svg>
