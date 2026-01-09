@@ -70,6 +70,17 @@ if (document.readyState === 'loading') {
     initializeApp();
 }
 
+// Also ensure projects load after a short delay as final fallback
+setTimeout(() => {
+    const select = document.getElementById('sidebar-project-select');
+    if (select && (select.options.length <= 1 || select.options[0].value === '')) {
+        console.log('🔄 Final fallback: Ensuring projects are loaded...');
+        if (typeof loadProjectsForSidebar === 'function') {
+            loadProjectsForSidebar().catch(err => console.error('Final fallback error:', err));
+        }
+    }
+}, 3000);
+
 // Also try after a short delay as fallback
 setTimeout(() => {
     const select = document.getElementById('sidebar-project-select');
