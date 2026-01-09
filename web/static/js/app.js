@@ -1224,22 +1224,6 @@ function renderAgentTerminal(agent) {
         </div>
     `;
 }
-            <div class="agent-terminal-header">
-                <div class="agent-terminal-title">
-                    <h3>${escapeHtml(displayId)}</h3>
-                    ${agent.last_update ? `<span class="agent-last-update" title="${escapeHtml(agent.last_update)}">${escapeHtml(agent.last_update.substring(0, 50))}...</span>` : ''}
-                </div>
-                <div class="agent-status">
-                    <span class="status-dot ${statusClass}"></span>
-                    <span>${escapeHtml(agent.status_text || agent.status)}</span>
-                </div>
-            </div>
-            <div class="agent-terminal-output" id="terminal-${escapeHtml(agent.id)}">
-                <div class="log-line info">Loading logs...</div>
-            </div>
-        </div>
-    `;
-}
 
 async function loadAgentLogs(agentId, logPath) {
     // Try to load logs via API first
