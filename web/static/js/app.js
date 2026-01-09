@@ -1342,16 +1342,39 @@ function updateStats(projects, agents, running, completed) {
 async function refreshStats() {
     try {
         console.log('📊 Refreshing stats...');
-        const [projectsRes, agentsRes] = await Promise.all([
-            fetch(`${API_BASE}/projects`),
-            fetch(`${API_BASE}/agents`)
-        ]);
         
+        // Get projects
+        const projectsRes = await fetch(`${API_BASE}/projects`);
         if (!projectsRes.ok) {
             throw new Error(`Projects API returned ${projectsRes.status}`);
         }
-        if (!agentsRes.ok) {
-            throw new Error(`Agents API returned ${agentsRes.status}`);
+        const projects = await projectsRes.json();
+        
+        // Get agents for CURRENT project only (not all agents)
+        let agents = [];
+        let running = 0;
+        let completed = 0;
+        
+        if (currentProjectId) {
+            const agentsRes = await fetch(`${API_BASE}/projects/${currentProjectId}/agents`);
+            if (agentsRes.ok) {
+                agents = await agentsRes.json();
+            }
+            
+            // Get status to count running/completed correctly
+            const statusRes = await fetch(`${API_BASE}/projects/${currentProjectId}/status`);
+            if (statusRes.ok) {
+                const status = await statusRes.json();
+                const tasks = status.tasks || [];
+                running = tasks.filter(t => t.status === 'running').length;
+                completed = tasks.filter(t => t.status === 'completed').length;
+            }
+        } else {
+            // No project selected - use all agents (legacy behavior)
+            const agentsRes = await fetch(`${API_BASE}/agents`);
+            if (agentsRes.ok) {
+                agents = await agentsRes.json();
+            }
         }
         
         const projects = await projectsRes.json();

@@ -813,11 +813,22 @@ def api_agents():
 
 @app.route('/api/projects/<project_id>/agents', methods=['GET'])
 def api_project_agents(project_id):
-    """Get agents for a specific project"""
+    """Get agents for a specific project - FILTERED to only this project"""
     status = get_project_status(project_id)
     if status is None:
         return jsonify({'error': 'Project not found'}), 404
-    return jsonify(status.get('agents', []))
+    
+    # Get agents and filter to only this project
+    all_agents = status.get('agents', [])
+    # Filter agents that belong to this project
+    project_agents = []
+    for agent in all_agents:
+        agent_id = agent.get('id', '')
+        # Include if agent ID contains project_id or matches project task IDs
+        if project_id in agent_id or any(task.get('id') == agent_id for task in status.get('tasks', [])):
+            project_agents.append(agent)
+    
+    return jsonify(project_agents)
 
 @app.route('/api/projects/<project_id>/insights', methods=['GET'])
 def api_project_insights(project_id):
