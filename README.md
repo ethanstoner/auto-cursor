@@ -8,6 +8,9 @@
 
 *Plan, build, and validate software with AI agents working in parallel*
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![GitHub](https://img.shields.io/github/stars/ethanstoner/auto-cursor?style=social)](https://github.com/ethanstoner/auto-cursor)
+
 </div>
 
 ---
@@ -16,12 +19,14 @@ Auto-Cursor lets you describe what you want to build, and it figures out how to 
 
 ## What it does
 
-You give it a high-level goal like "add user authentication" or "create a landing page with React and Tailwind". Auto-Cursor:
+You give it a high-level goal like "add user authentication" or "create a landing page with React and Tailwind". Auto-Cursor handles the rest:
 
-1. **Plans** - Analyzes your project and breaks the goal into specific tasks
-2. **Executes** - Runs multiple agents in parallel (they work on different tasks simultaneously)
-3. **Validates** - Automatically runs QA checks when tasks complete
-4. **Integrates** - Merges everything back to your main branch, handling conflicts automatically
+| Step | Description |
+|------|-------------|
+| **Plans** | Analyzes your project and breaks the goal into specific tasks |
+| **Executes** | Runs multiple agents in parallel (they work on different tasks simultaneously) |
+| **Validates** | Automatically runs QA checks when tasks complete |
+| **Integrates** | Merges everything back to your main branch, handling conflicts automatically |
 
 Each task runs in its own git worktree, so your main branch stays safe. Agents can work on independent tasks at the same time, which speeds things up significantly.
 
@@ -29,14 +34,12 @@ Each task runs in its own git worktree, so your main branch stays safe. Agents c
 
 ## Requirements
 
-You'll need:
-
-- **Cursor CLI** with `cursor-agent` installed and working
-- **Git** (your project needs to be a git repo)
-- **jq** for JSON processing
-  - Linux/WSL: `sudo apt-get install jq`
-  - Mac: `brew install jq`
-- **tmux** (optional) - Helps with agent session management
+| Requirement | Description |
+|------------|-------------|
+| **Cursor CLI** | `cursor-agent` must be installed and working |
+| **Git** | Your project needs to be a git repository |
+| **jq** | For JSON processing<br>Linux/WSL: `sudo apt-get install jq`<br>Mac: `brew install jq` |
+| **tmux** | Optional - Helps with agent session management |
 
 ---
 
@@ -63,7 +66,7 @@ auto-cursor review my-project-id all
 auto-cursor merge my-project-id all
 ```
 
-The planning step analyzes your project structure, figures out what needs to be done, and creates a task breakdown with dependencies. When you start execution, agents begin working in parallel (respecting dependencies), and QA runs automatically when each task finishes.
+> **Note:** The planning step analyzes your project structure, figures out what needs to be done, and creates a task breakdown with dependencies. When you start execution, agents begin working in parallel (respecting dependencies), and QA runs automatically when each task finishes.
 
 ---
 
@@ -80,7 +83,7 @@ auto-cursor list                               # List all projects
 
 ```bash
 auto-cursor plan <project-id> <goal>          # Create a plan
-auto-cursor start <project-id> [--skip-qa]     # Start execution
+auto-cursor start <project-id> [--skip-qa]   # Start execution
 auto-cursor continue <project-id>              # Continue if interrupted
 ```
 
@@ -88,8 +91,8 @@ auto-cursor continue <project-id>              # Continue if interrupted
 
 ```bash
 auto-cursor status <project-id>                # Show kanban board
-auto-cursor board <project-id>                # Interactive board (auto-refresh)
-auto-cursor tasks <project-id>                # List all tasks
+auto-cursor board <project-id>                 # Interactive board (auto-refresh)
+auto-cursor tasks <project-id>                 # List all tasks
 auto-cursor logs <project-id> [task-id]        # View logs
 ```
 
@@ -97,17 +100,17 @@ auto-cursor logs <project-id> [task-id]        # View logs
 
 ```bash
 auto-cursor review <project-id> [task-id|all]  # Review changes
-auto-cursor diff <project-id> <task-id>        # Show diff
-auto-cursor merge <project-id> [task-id|all]   # Merge to main
+auto-cursor diff <project-id> <task-id>       # Show diff
+auto-cursor merge <project-id> [task-id|all]  # Merge to main
 auto-cursor discard <project-id> [task-id|all] # Discard without merging
 ```
 
 ### Utilities
 
 ```bash
-auto-cursor retry <project-id> [task-id|all]  # Retry failed tasks
-auto-cursor memory <project-id>               # View project insights
-auto-cursor clean <project-id>                # Clean up worktrees
+auto-cursor retry <project-id> [task-id|all]   # Retry failed tasks
+auto-cursor memory <project-id>                # View project insights
+auto-cursor clean <project-id>                 # Clean up worktrees
 ```
 
 ---
@@ -117,6 +120,7 @@ auto-cursor clean <project-id>                # Clean up worktrees
 ### Planning Phase
 
 When you run `auto-cursor plan`, it:
+
 - Looks at your project structure (detects `backend/`, `frontend/`, `api/` directories, etc.)
 - Uses `cursor-agent` to break your goal into tasks
 - Figures out which tasks depend on others
@@ -125,6 +129,7 @@ When you run `auto-cursor plan`, it:
 ### Execution Phase
 
 When you run `auto-cursor start`:
+
 - Each task gets its own git worktree
 - Agents start working in parallel
 - If task B depends on task A, it waits for A to finish first
@@ -135,6 +140,7 @@ When you run `auto-cursor start`:
 ### Integration Phase
 
 When you're ready to merge:
+
 - `auto-cursor merge` checks for conflicts
 - Uses AI to resolve conflicts automatically
 - Merges everything back to main
@@ -146,10 +152,12 @@ When you're ready to merge:
 
 ### Components
 
-- **`auto-cursor`** - Main CLI tool
-- **`auto-cursor-planner`** - Handles task planning
-- **`auto-cursor-merge`** - Handles merge conflict resolution
-- **`orchestrate-agents`** - Manages multiple agents
+| Component | Description |
+|-----------|-------------|
+| `auto-cursor` | Main CLI tool |
+| `auto-cursor-planner` | Handles task planning |
+| `auto-cursor-merge` | Handles merge conflict resolution |
+| `orchestrate-agents` | Manages multiple agents |
 
 ### Data Structure
 
@@ -199,7 +207,7 @@ auto-cursor start my-app
 auto-cursor merge my-app all
 ```
 
-It works with pretty much any project type - web apps, APIs, full-stack, mobile, desktop, data science, DevOps, games, CLI tools. The planner adapts to your project structure.
+> It works with pretty much any project type - web apps, APIs, full-stack, mobile, desktop, data science, DevOps, games, CLI tools. The planner adapts to your project structure.
 
 ---
 
