@@ -344,6 +344,13 @@ start_agent() {
         return 1
     fi
     
+    # CRITICAL: Check if agent is already completed - don't restart completed tasks
+    local current_status=$(get_agent_status "$agent_id")
+    if [ "$current_status" = "completed" ] || [ "$current_status" = "qa_passed" ] || [ "$current_status" = "qa_failed" ]; then
+        echo -e "${CYAN}Agent $agent_id is already completed (status: $current_status) - skipping${NC}"
+        return 0
+    fi
+    
     # Check dependencies
     if ! check_dependencies "$agent_id" "$task_file"; then
         echo -e "${YELLOW}Agent $agent_id waiting for dependencies...${NC}"
