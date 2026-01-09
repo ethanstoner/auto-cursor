@@ -1,3 +1,7 @@
+<div align="center">
+
+<img src="logo.png" alt="Auto-Cursor Logo" width="150" height="150">
+
 # Auto-Cursor
 
 **Autonomous multi-agent coding framework that plans, builds, and validates software for you.**
@@ -5,6 +9,14 @@
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](./LICENSE)
 [![GitHub](https://img.shields.io/github/stars/ethanstoner/auto-cursor?style=flat-square)](https://github.com/ethanstoner/auto-cursor)
 [![GitHub Issues](https://img.shields.io/github/issues/ethanstoner/auto-cursor?style=flat-square)](https://github.com/ethanstoner/auto-cursor/issues)
+
+</div>
+
+<div align="center">
+
+[Quick Start](#quick-start) • [Commands](#commands) • [Examples](#examples) • [Troubleshooting](#troubleshooting)
+
+</div>
 
 ---
 
@@ -365,3 +377,13 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 - Inspired by [Auto-Claude](https://github.com/AndyMik90/Auto-Claude)
 - Built for [Cursor CLI](https://cursor.sh/) agents
+
+---
+
+<div align="center">
+
+**Made with ❤️ for autonomous software development**
+
+[⭐ Star on GitHub](https://github.com/ethanstoner/auto-cursor) • [📖 Documentation](#table-of-contents) • [🚀 Quick Start](#quick-start)
+
+</div>
