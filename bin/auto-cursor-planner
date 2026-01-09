@@ -40,6 +40,42 @@ generate_plan() {
     local goal="$1"
     local project_path="${2:-.}"
     local complexity_override="${3:-}"
+    local memory_file="${4:-}"
+    
+    # Load memory if provided
+    local memory_context=""
+    if [ -n "$memory_file" ] && [ -f "$memory_file" ]; then
+        local memory_json=$(cat "$memory_file" 2>/dev/null || echo "{}")
+        
+        # Extract insights from memory
+        local successful_patterns=$(echo "$memory_json" | jq -r '.successful_patterns // [] | if length > 0 then "Successful patterns from past builds:\n" + (.[] | "- " + .) else "" end' 2>/dev/null || echo "")
+        local anti_patterns=$(echo "$memory_json" | jq -r '.anti_patterns // [] | if length > 0 then "Avoid these patterns (learned from past mistakes):\n" + (.[] | "- " + .) else "" end' 2>/dev/null || echo "")
+        local optimizations=$(echo "$memory_json" | jq -r '.optimizations // [] | if length > 0 then "Optimizations that worked well:\n" + (.[] | "- " + .) else "" end' 2>/dev/null || echo "")
+        local project_type=$(echo "$memory_json" | jq -r '.project_type // ""' 2>/dev/null || echo "")
+        local tech_stack=$(echo "$memory_json" | jq -r '.tech_stack // [] | join(", ")' 2>/dev/null || echo "")
+        
+        if [ -n "$successful_patterns" ] || [ -n "$anti_patterns" ] || [ -n "$optimizations" ] || [ -n "$project_type" ]; then
+            memory_context="\n\n=== MEMORY & INSIGHTS FROM PAST BUILDS ===\n"
+            
+            if [ -n "$project_type" ]; then
+                memory_context="${memory_context}Project Type: ${project_type}\n"
+            fi
+            if [ -n "$tech_stack" ] && [ "$tech_stack" != "" ]; then
+                memory_context="${memory_context}Tech Stack: ${tech_stack}\n"
+            fi
+            if [ -n "$successful_patterns" ]; then
+                memory_context="${memory_context}\n${successful_patterns}\n"
+            fi
+            if [ -n "$anti_patterns" ]; then
+                memory_context="${memory_context}\n${anti_patterns}\n"
+            fi
+            if [ -n "$optimizations" ]; then
+                memory_context="${memory_context}\n${optimizations}\n"
+            fi
+            
+            memory_context="${memory_context}\nUse these insights to create a better plan. Learn from past successes and avoid known mistakes.\n"
+        fi
+    fi
     
     # Check project structure to inform planning
     local has_backend=false
@@ -66,6 +102,9 @@ generate_plan() {
     local prompt=$(echo "$PLAN_PROMPT_TEMPLATE" | sed "s/{GOAL}/$escaped_goal/")
     if [ -n "$context" ]; then
         prompt="${prompt}\n\nContext: ${context}"
+    fi
+    if [ -n "$memory_context" ]; then
+        prompt="${prompt}${memory_context}"
     fi
     
     # Add complexity override if provided
@@ -157,12 +196,23 @@ generate_plan() {
     # Validate JSON structure - must be an array
     if [ -n "$json_output" ] && [ "$json_output" != "[]" ] && [ "$json_output" != "null" ]; then
         if ! echo "$json_output" | jq 'type == "array"' >/dev/null 2>&1; then
-            json_output=""
+            # If it's not an array, try to extract array from it
+            if echo "$json_output" | jq 'type == "object"' >/dev/null 2>&1; then
+                # If it's an object, try to get array from result field
+                local array_from_obj=$(echo "$json_output" | jq -r '.result // empty' 2>/dev/null | grep -oE '\[[\s\S]*\]' | head -1 || echo "")
+                if [ -n "$array_from_obj" ] && echo "$array_from_obj" | jq 'type == "array"' >/dev/null 2>&1; then
+                    json_output="$array_from_obj"
+                else
+                    json_output=""
+                fi
+            else
+                json_output=""
+            fi
         fi
     fi
     
     # If still no valid JSON, create a fallback plan
-    if [ -z "$json_output" ] || [ "$json_output" = "[]" ] || ! echo "$json_output" | jq . >/dev/null 2>&1; then
+    if [ -z "$json_output" ] || [ "$json_output" = "[]" ] || [ "$json_output" = "null" ] || ! echo "$json_output" | jq 'type == "array"' >/dev/null 2>&1; then
         json_output=$(cat << EOF
 [
   {
@@ -185,8 +235,8 @@ EOF
 # If run directly
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
     if [ $# -lt 1 ]; then
-        echo "Usage: $0 <goal> [project-path] [complexity-override]"
+        echo "Usage: $0 <goal> [project-path] [complexity-override] [memory-file]"
         exit 1
     fi
-    generate_plan "$1" "${2:-.}" "${3:-}"
+    generate_plan "$1" "${2:-.}" "${3:-}" "${4:-}"
 fi

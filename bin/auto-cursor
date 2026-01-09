@@ -182,9 +182,13 @@ plan_goal() {
     fi
     echo ""
     
-    # Use enhanced planner with complexity override
+    # Use enhanced planner with complexity override and memory
+    local memory_file="${project_dir}/memory.json"
     echo -e "${BLUE}Generating plan with AI...${NC}"
-    local plan_json=$(auto-cursor-planner "$goal" "$project_path" "$complexity")
+    if [ -f "$memory_file" ] && [ -s "$memory_file" ] && [ "$(cat "$memory_file" | jq 'keys | length' 2>/dev/null || echo "0")" != "0" ]; then
+        echo -e "${CYAN}Using memory insights from past builds...${NC}"
+    fi
+    local plan_json=$(auto-cursor-planner "$goal" "$project_path" "$complexity" "$memory_file")
     
     # Save plan
     echo "$plan_json" | jq '.' > "${project_dir}/plan.json"
@@ -210,6 +214,10 @@ plan_goal() {
         task_count="0"
     fi
     echo -e "${GREEN}Plan created with $task_count tasks${NC}"
+    
+    # Try to save memory (will only save if there's existing successful history)
+    save_plan_to_memory "$project_id" 2>/dev/null || true
+    
     echo ""
     
     # Validate plan
@@ -465,11 +473,14 @@ show_status() {
     local tasks_file="${project_dir}/tasks.json"
     local orchestration_file="${project_dir}/orchestration.json"
     
-    echo -e "${MAGENTA}=== Auto-Cursor Kanban Board: $project_id ===${NC}"
-    echo ""
-    
     # Load tasks
     local tasks=$(cat "$tasks_file" 2>/dev/null || echo "[]")
+    
+    # Try to save memory if tasks are completed (runs in background, doesn't block)
+    save_plan_to_memory "$project_id" 2>/dev/null || true
+    
+    echo -e "${MAGENTA}=== Auto-Cursor Kanban Board: $project_id ===${NC}"
+    echo ""
     
     # Group by status
     local pending=$(echo "$tasks" | jq '[.[] | select(.status == "pending")]')
@@ -567,13 +578,13 @@ show_logs() {
         
         for tid in $task_ids; do
             echo -e "${MAGENTA}--- Task: $tid ---${NC}"
-            orchestrate-agents logs "$tid" 2>/dev/null || echo "  No logs available"
+            orchestrate-agents logs "$tid" false 2>/dev/null || echo "  No logs available"
             echo ""
         done
     else
         echo -e "${CYAN}=== Logs for $task_id ===${NC}"
         echo ""
-        orchestrate-agents logs "$task_id" 2>/dev/null || {
+        orchestrate-agents logs "$task_id" false 2>/dev/null || {
             echo -e "${YELLOW}No logs found. Agent may not be running.${NC}"
             echo "Check status with: auto-cursor status $project_id"
         }
@@ -802,6 +813,79 @@ continue_execution() {
     
     echo ""
     echo -e "${CYAN}Use 'auto-cursor status $project_id' to monitor progress${NC}"
+}
+
+# Save successful plan to memory
+save_plan_to_memory() {
+    local project_id="$1"
+    local project_dir="${PROJECTS_DIR}/${project_id}"
+    
+    if [ ! -d "$project_dir" ]; then
+        return 1
+    fi
+    
+    local memory_file="${project_dir}/memory.json"
+    local tasks_file="${project_dir}/tasks.json"
+    local plan_file="${project_dir}/plan.json"
+    
+    if [ ! -f "$tasks_file" ] || [ ! -f "$plan_file" ]; then
+        return 1
+    fi
+    
+    # Check if all tasks are completed successfully
+    local tasks=$(cat "$tasks_file" 2>/dev/null || echo "[]")
+    local all_completed=$(echo "$tasks" | jq '[.[] | select(.status == "completed" or .status == "qa_passed")] | length' 2>/dev/null || echo "0")
+    local total_tasks=$(echo "$tasks" | jq 'length' 2>/dev/null || echo "0")
+    
+    # Only save if at least 80% of tasks completed successfully
+    if [ "$all_completed" = "0" ] || [ "$total_tasks" = "0" ]; then
+        return 0
+    fi
+    
+    # Calculate success rate (using integer math)
+    local success_rate=$((all_completed * 100 / total_tasks))
+    if [ "$success_rate" -lt 80 ]; then
+        return 0
+    fi
+    
+    # Load existing memory
+    local memory=$(cat "$memory_file" 2>/dev/null || echo "{}")
+    
+    # Extract patterns from successful tasks
+    local successful_tasks=$(echo "$tasks" | jq '[.[] | select(.status == "completed" or .status == "qa_passed")]')
+    local plan=$(cat "$plan_file" 2>/dev/null || echo "[]")
+    
+    # Extract common patterns
+    local patterns=$(echo "$successful_tasks" | jq -r '[.[] | .description] | .[]' | grep -iE "(create|add|implement|build|setup|configure)" | head -5 | jq -R . | jq -s . 2>/dev/null || echo "[]")
+    
+    # Detect project type from directory structure
+    local project_path=$(jq -r '.path' "${project_dir}/config.json" 2>/dev/null || echo "")
+    local project_type=""
+    if [ -n "$project_path" ] && [ -d "$project_path" ]; then
+        if [ -f "$project_path/package.json" ]; then
+            project_type="nodejs"
+        elif [ -f "$project_path/requirements.txt" ] || [ -f "$project_path/pyproject.toml" ]; then
+            project_type="python"
+        elif [ -d "$project_path/src" ] && [ -f "$project_path/Cargo.toml" ]; then
+            project_type="rust"
+        elif [ -d "$project_path/backend" ] && [ -d "$project_path/frontend" ]; then
+            project_type="fullstack"
+        fi
+    fi
+    
+    # Detect tech stack
+    local tech_stack=$(echo "$plan" | jq -r '[.[] | .directory] | unique | .[]' | grep -E "(api|backend|frontend|ui|component)" | head -3 | jq -R . | jq -s . 2>/dev/null || echo "[]")
+    
+    # Update memory
+    local updated_memory=$(echo "$memory" | jq --argjson patterns "$patterns" --argjson tech_stack "$tech_stack" --arg project_type "$project_type" '
+        .successful_patterns = ((.successful_patterns // []) + $patterns | unique | .[0:10]) |
+        .tech_stack = ((.tech_stack // []) + $tech_stack | unique) |
+        .project_type = (if .project_type == "" or .project_type == null then $project_type else .project_type end) |
+        .last_successful_build = now |
+        .total_successful_builds = ((.total_successful_builds // 0) + 1)
+    ' 2>/dev/null || echo "$memory")
+    
+    echo "$updated_memory" | jq '.' > "$memory_file" 2>/dev/null || true
 }
 
 # Show memory/insights
