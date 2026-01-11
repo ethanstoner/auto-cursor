@@ -5,6 +5,9 @@
 
 set -euo pipefail
 
+# Version
+VERSION="10.0.1"
+
 # Configuration
 AUTO_CURSOR_DIR="${AUTO_CURSOR_DIR:-$HOME/.auto-cursor}"
 PROJECTS_DIR="${AUTO_CURSOR_DIR}/projects"
@@ -23,69 +26,128 @@ NC='\033[0m'
 # Create directories
 mkdir -p "$AUTO_CURSOR_DIR" "$PROJECTS_DIR" "$MEMORY_DIR" "$WORKTREES_DIR"
 
+# Command Registry (Single Source of Truth)
+# Format: "command:description:min_args:max_args:flags"
+declare -A COMMAND_REGISTRY=(
+    ["init"]="Initialize a new project:1:2:"
+    ["plan"]="Create a plan for a goal:2:999:--interactive --complexity"
+    ["start"]="Start executing the current plan:1:1:--parallel"
+    ["status"]="Show kanban board status:1:1:--detailed"
+    ["board"]="Interactive kanban board:1:1:"
+    ["tasks"]="List all tasks with details:1:1:"
+    ["validate"]="Validate plan structure and dependencies:1:1:--auto-fix"
+    ["plan-review"]="Review generated plan:1:1:"
+    ["plan-edit"]="Edit plan interactively:1:1:"
+    ["task-add"]="Add custom task to plan:2:999:"
+    ["task-remove"]="Remove task from plan:2:2:"
+    ["task-modify"]="Modify task in plan:2:2:"
+    ["pause"]="Pause specific task:2:2:"
+    ["cancel"]="Cancel specific task:2:2:"
+    ["agent"]="Show agent working on task:2:2:"
+    ["logs"]="View agent logs (use 'all' for all tasks):1:2:--tail"
+    ["retry"]="Retry failed task (use 'all' for all failed):1:2:"
+    ["diff"]="Show diff before merge:2:2:"
+    ["merge"]="Merge worktree back to main (use 'all' for all tasks):1:2:"
+    ["review"]="Review changes in worktree (use 'all' for all):1:2:"
+    ["discard"]="Discard worktree without merging:1:2:"
+    ["run"]="Golden-path: init → plan → validate → start → review → merge → summary:2:3:"
+    ["website"]="One-shot website builder: converts business brief to spec and runs golden-path:2:3:--parallel"
+    ["trace-summary"]="Show execution trace summary with concurrency analysis:1:1:"
+    ["progress"]="Show live progress view for a project:1:1:"
+    ["upgrade-check"]="Check for updates and show changelog:0:0:"
+    ["continue"]="Continue interrupted execution:1:1:"
+    ["summary"]="Show run summary with per-task results:1:1:"
+    ["migrate"]="Migrate project state to current version:1:1:"
+    ["cleanup"]="Clean up terminal-state worktrees for a project:1:1:"
+    ["contracts"]="Check contract enforcement:1:1:"
+    ["memory"]="View memory/insights:1:1:"
+    ["list"]="List all projects:0:0:"
+    ["clean"]="Clean up worktrees and agents (only project agents):1:1:"
+    ["doctor"]="Check system health and dependencies:0:0:"
+    ["version"]="Show version:0:0:"
+    ["help"]="Show this help message:0:0:"
+)
+
+# Blocked flags (violate safety guarantees)
+BLOCKED_FLAGS=("--skip-qa" "--max-iterations")
+
+check_blocked_flag() {
+    local flag="$1"
+    for blocked in "${BLOCKED_FLAGS[@]}"; do
+        if [ "$flag" = "$blocked" ]; then
+            echo -e "${RED}Error: Flag $flag is not supported in v1.0.0 due to safety guarantees.${NC}" >&2
+            echo -e "${YELLOW}This flag would bypass verification gates and is not allowed.${NC}" >&2
+            exit 1
+        fi
+    done
+}
+
 usage() {
     cat << EOF
 Auto-Cursor: Autonomous Multi-Agent Coding Framework
+Version: $VERSION
 
 Usage: auto-cursor <command> [options]
 
 Commands:
-  init <project-path>          Initialize a new project
-  plan <project-id> <goal>     Create a plan for a goal
-    --interactive              Interactive goal refinement
-    --complexity <level>       Override complexity (simple/medium/complex)
-  start <project-id>           Start executing the current plan
-    --skip-qa                  Skip automatic QA validation
-    --max-iterations <n>       Limit iterations (placeholder)
-  status <project-id>          Show kanban board status
-    --detailed                 Show detailed progress with time estimates
-  board <project-id>           Interactive kanban board
-  tasks <project-id>           List all tasks with details
-  validate <project-id>        Validate plan structure and dependencies
-    --auto-fix                 Auto-fix common issues
-  plan-review <project-id>    Review generated plan
-  plan-edit <project-id>       Edit plan interactively
-  task-add <project-id> <desc> Add custom task to plan
-  task-remove <project-id> <id> Remove task from plan
-  task-modify <project-id> <id> Modify task in plan
-  pause <project-id> <task-id> Pause specific task
-  cancel <project-id> <task-id> Cancel specific task
-  agent <project-id> <task-id> Show agent working on task
-  logs <project-id> [task-id]  View agent logs (use 'all' for all tasks)
-  retry <project-id> [task-id] Retry failed task (use 'all' for all failed)
-  diff <project-id> <task-id>  Show diff before merge
-  merge <project-id> [task-id] Merge worktree back to main (use 'all' for all tasks)
-  review <project-id> [task-id] Review changes in worktree (use 'all' for all)
-  discard <project-id> [task-id] Discard worktree without merging
-  continue <project-id>        Continue interrupted execution
-  memory <project-id>          View memory/insights
-  list                         List all projects
-  clean <project-id>           Clean up worktrees and agents (only project agents)
-  web                          Start web interface on localhost (default port 8765)
-  serve                        Alias for 'web' command
+EOF
+    
+    # Generate help from registry
+    for cmd in $(printf '%s\n' "${!COMMAND_REGISTRY[@]}" | sort); do
+        local entry="${COMMAND_REGISTRY[$cmd]}"
+        local desc=$(echo "$entry" | cut -d: -f1)
+        local flags=$(echo "$entry" | cut -d: -f5)
+        
+        printf "  %-20s %s\n" "$cmd" "$desc"
+        
+        if [ -n "$flags" ]; then
+            for flag in $flags; do
+                case "$flag" in
+                    --interactive)
+                        echo "    --interactive              Interactive goal refinement"
+                        ;;
+                    --complexity)
+                        echo "    --complexity <level>       Override complexity (simple/medium/complex)"
+                        ;;
+                    --parallel)
+                        echo "    --parallel <n>             Max concurrent tasks (default: 3)"
+                        ;;
+                    --detailed)
+                        echo "    --detailed                 Show detailed progress with time estimates"
+                        ;;
+                    --auto-fix)
+                        echo "    --auto-fix                 Auto-fix common issues"
+                        ;;
+                    --tail)
+                        echo "    --tail                     Stream logs with task prefixes"
+                        ;;
+                esac
+            done
+        fi
+    done
+    
+    cat << EOF
 
 Examples:
-  # Initialize a project
-  auto-cursor init ~/my-project
+  # Quick start (golden path)
+  auto-cursor run ~/my-project "Build a marketing website"
 
-  # Plan a feature (interactive)
-  auto-cursor plan my-project --interactive
+  # Check system health
+  auto-cursor doctor
 
-  # Plan with complexity override
-  auto-cursor plan my-project "Fix button color" --complexity simple
-
-  # Validate plan before starting
-  auto-cursor validate my-project
-
-  # Review and edit plan
-  auto-cursor plan-review my-project
-  auto-cursor plan-edit my-project
+  # Initialize and plan manually
+  auto-cursor init ~/my-project my-project
+  auto-cursor plan my-project "Add user authentication"
 
   # Start execution
-  auto-cursor start my-project
+  auto-cursor start my-project --parallel 3
 
-  # View detailed status
-  auto-cursor status my-project --detailed
+  # View status and summary
+  auto-cursor status my-project
+  auto-cursor summary my-project
+
+  # Check contracts
+  auto-cursor contracts my-project
 EOF
 }
 
@@ -108,13 +170,14 @@ init_project() {
     local project_dir="${PROJECTS_DIR}/${project_id}"
     mkdir -p "$project_dir"
     
-    # Create project config
+    # Create project config with state version
     cat > "${project_dir}/config.json" << EOF
 {
   "id": "$project_id",
   "path": "$project_path",
   "created": "$(date -Iseconds)",
-  "status": "active"
+  "status": "active",
+  "state_version": "7.0"
 }
 EOF
     
@@ -198,7 +261,7 @@ plan_goal() {
     # Save plan output for debugging
     echo "$plan_json" | jq '.' > "${project_dir}/plan-output.json"
     
-    # Convert plan to tasks with status
+    # Convert plan to tasks with status and lifecycle fields
     local tasks_json=$(echo "$plan_json" | jq 'map(. + {
       "status": "pending",
       "agent_id": null,
@@ -206,7 +269,16 @@ plan_goal() {
       "created": now,
       "started": null,
       "completed": null,
-      "qa_status": null
+      "qa_status": null,
+      "verify_commands": (.verify_commands // []),
+      "retry_count": 0,
+      "max_retries": 3,
+      "logs_path": null,
+      "last_qa_run": null,
+      "last_qa_result": null,
+      "owner_role": (.owner_role // "frontend"),
+      "owned_paths": (.owned_paths // [.directory]),
+      "boundaries": (.boundaries // "do not edit outside owned_paths")
     })')
     
     echo "$tasks_json" | jq '.' > "${project_dir}/tasks.json"
@@ -286,9 +358,14 @@ Respond with:
 - Any questions or concerns"
     
     local temp_refine=$(mktemp)
+    local adapter="${BASH_SOURCE[0]%/*}/cursor-agent-adapter"
+    if [ ! -f "$adapter" ]; then
+        adapter="cursor-agent"
+    fi
+    
     (
         cd "$project_path"
-        cursor-agent --print "$refinement_prompt" > "$temp_refine" 2>&1 || true
+        "$adapter" --print "$refinement_prompt" > "$temp_refine" 2>&1 || true
     )
     
     local refined_output=$(cat "$temp_refine" | grep -v "^\[" | head -20)
@@ -341,6 +418,7 @@ start_execution() {
     local project_id="$1"
     local max_iterations="${2:-}"
     local skip_qa="${3:-false}"
+    local parallel="${4:-3}"
     local project_dir="${PROJECTS_DIR}/${project_id}"
     
     if [ ! -d "$project_dir" ]; then
@@ -350,6 +428,14 @@ start_execution() {
     
     local project_path=$(jq -r '.path' "${project_dir}/config.json")
     local tasks_file="${project_dir}/tasks.json"
+    
+    # Warn if validate hasn't been run
+    if [ -f "$tasks_file" ]; then
+        local validated=$(jq -r '.[0].validated // false' "$tasks_file" 2>/dev/null || echo "false")
+        if [ "$validated" != "true" ]; then
+            echo -e "${YELLOW}⚠ Warning: Plan has not been validated. Run 'auto-cursor validate $project_id' first.${NC}"
+        fi
+    fi
     
     # Load tasks
     local tasks=$(cat "$tasks_file")
@@ -421,18 +507,37 @@ EOF
   "agents": $agents_array,
   "coordination": {
     "shared_vars": [],
-    "qa_on_completion": true
+    "qa_on_completion": true,
+    "max_parallel": $parallel
   }
 }
 EOF
     
-    # Update task statuses
-    local updated_tasks=$(echo "$tasks" | jq 'map(.status = "running" | .started = now)')
+    echo -e "${BLUE}Max parallel tasks: $parallel${NC}"
+    
+    # REGRESSION_GUARD: Update task statuses - set to "pending" so scheduler can properly manage lifecycle
+    # Status will be set to "running" by orchestrate-agents only after successful spawn
+    # DO NOT set to "running" here - this was the root cause of the bug
+    local updated_tasks=$(echo "$tasks" | jq 'map(.status = "pending" | .started = null | .attempts = null)')
     echo "$updated_tasks" | jq '.' > "$tasks_file"
+    
+    # REGRESSION_GUARD: Validate that we didn't accidentally reintroduce the bug
+    local regression_guard="${BASH_SOURCE[0]%/*}/regression-guard.sh"
+    if [ -f "$regression_guard" ]; then
+        if ! "$regression_guard" "$project_id" 2>/dev/null; then
+            echo -e "${RED}REGRESSION_DETECTED: Tasks initialized as 'running' before spawn${NC}" >&2
+            echo -e "${RED}This bug was fixed - check bin/auto-cursor line ~519${NC}" >&2
+            exit 1
+        fi
+    fi
     
     # Store project metadata for cleanup tracking
     echo "$project_id" > "${project_dir}/.project-id"
     echo "$(date -Iseconds)" > "${project_dir}/.last-started"
+    
+    # CRITICAL: Export AUTO_CURSOR_MODE to ensure it's available to orchestrate-agents
+    # This ensures assert_real_or_warn correctly detects REAL vs DRY mode
+    export AUTO_CURSOR_MODE="${AUTO_CURSOR_MODE:-REAL}"
     
     # Start orchestration with automatic monitoring
     echo -e "${GREEN}Starting agents with orchestration...${NC}"
@@ -463,6 +568,61 @@ EOF
 }
 
 # Status display
+# Get task debugging info (port, readiness, Playwright result, artifacts)
+get_task_debug_info() {
+    local project_id="$1"
+    local task_id="$2"
+    local project_dir="${PROJECTS_DIR}/${project_id}"
+    
+    local info=""
+    
+    # Get port
+    local port_file="${HOME}/.auto-cursor/server-state/${task_id}.port"
+    if [ -f "$port_file" ]; then
+        local port=$(cat "$port_file")
+        info="${info}Port: $port | "
+    fi
+    
+    # Get base_url
+    if [ -n "$port" ]; then
+        info="${info}Base URL: http://127.0.0.1:${port} | "
+    fi
+    
+    # Get readiness result
+    local proof_file="${HOME}/.auto-cursor/server-state/${task_id}.readiness-proof"
+    if [ -f "$proof_file" ]; then
+        info="${info}Readiness: READY | "
+    elif [ -f "${HOME}/.auto-cursor/server-state/${task_id}.readiness-failure" ]; then
+        info="${info}Readiness: FAILED | "
+    fi
+    
+    # Get Playwright result from tasks.json
+    local tasks_file="${project_dir}/tasks.json"
+    if [ -f "$tasks_file" ]; then
+        local playwright_result=$(jq -r ".[] | select(.id == \"$task_id\") | .last_qa_result // \"\" | select(. != \"\")" "$tasks_file" 2>/dev/null || echo "")
+        if [ -n "$playwright_result" ]; then
+            info="${info}Playwright: $playwright_result | "
+        fi
+        
+        # Get flaky pass status
+        local flaky_pass=$(jq -r ".[] | select(.id == \"$task_id\") | .flaky_pass // false" "$tasks_file" 2>/dev/null || echo "false")
+        if [ "$flaky_pass" = "true" ]; then
+            info="${info}Flaky: YES | "
+        fi
+    fi
+    
+    # Get artifact path
+    local artifacts_dir="${project_dir}/artifacts/${task_id}"
+    if [ -d "$artifacts_dir" ]; then
+        local latest_attempt=$(ls -td "${artifacts_dir}"/attempt-* 2>/dev/null | head -1)
+        if [ -n "$latest_attempt" ]; then
+            info="${info}Artifacts: $latest_attempt"
+        fi
+    fi
+    
+    echo "$info"
+}
+
 show_status() {
     local project_id="$1"
     local project_dir="${PROJECTS_DIR}/${project_id}"
@@ -556,8 +716,23 @@ show_tasks() {
   Complexity: \(.complexity // "unknown")
   Directory: \(.directory // ".")
   Dependencies: \(.dependencies // [] | join(", ") // "none")
-  Estimated: \(.estimated_hours // "unknown") hours
-"'
+  Estimated: \(.estimated_hours // "unknown") hours"'
+    
+    # Add debugging info for running/failed tasks
+    echo ""
+    echo -e "${CYAN}Debugging Info:${NC}"
+    echo "$tasks" | jq -r '.[] | select(.status == "running" or .status == "qa_running" or .status == "qa_failed" or .status == "failed") | .id' | while read -r task_id; do
+        if [ -n "$task_id" ]; then
+            echo ""
+            echo -e "${YELLOW}Task: $task_id${NC}"
+            local debug_info=$(get_task_debug_info "$project_id" "$task_id" "$project_dir")
+            if [ -n "$debug_info" ]; then
+                echo "  $debug_info"
+            else
+                echo "  (No debugging info available)"
+            fi
+        fi
+    done
 }
 
 # Show agent logs
@@ -586,8 +761,55 @@ show_logs() {
     else
         echo -e "${CYAN}=== Logs for $task_id ===${NC}"
         echo ""
+        
+        # Show debugging info
+        local debug_info=$(get_task_debug_info "$project_id" "$task_id" "$project_dir")
+        if [ -n "$debug_info" ]; then
+            echo -e "${YELLOW}Debugging Info:${NC}"
+            echo "  $debug_info"
+            echo ""
+        fi
+        
+        # Show server log (last 20 lines)
+        local server_log="${HOME}/.auto-cursor/server-state/${task_id}.server.log"
+        if [ -f "$server_log" ]; then
+            echo -e "${CYAN}Server Log (last 20 lines):${NC}"
+            tail -20 "$server_log" | sed 's/^/  /'
+            echo ""
+        fi
+        
+        # Show Playwright output (last 30 lines)
+        local qa_log="/tmp/cursor-agents/qa/${task_id}.log"
+        if [ -f "$qa_log" ]; then
+            echo -e "${CYAN}Playwright/QA Log (last 30 lines):${NC}"
+            tail -30 "$qa_log" | sed 's/^/  /'
+            echo ""
+        fi
+        
+        # Show artifact path
+        local artifacts_dir="${project_dir}/artifacts/${task_id}"
+        if [ -d "$artifacts_dir" ]; then
+            local latest_attempt=$(ls -td "${artifacts_dir}"/attempt-* 2>/dev/null | head -1)
+            if [ -n "$latest_attempt" ]; then
+                echo -e "${CYAN}Artifacts:${NC}"
+                echo "  Path: $latest_attempt"
+                if [ -f "${latest_attempt}/manifest.json" ]; then
+                    echo "  Manifest: ${latest_attempt}/manifest.json"
+                    echo "  Contents:"
+                    jq -r '.artifacts | to_entries[] | "    \(.key): \(.value)"' "${latest_attempt}/manifest.json" 2>/dev/null || echo "    (Unable to parse manifest)"
+                fi
+                echo ""
+                echo "  To view Playwright report:"
+                echo "    cd $latest_attempt/playwright-report && python3 -m http.server 8080"
+                echo "  To view trace:"
+                echo "    npx playwright show-trace $latest_attempt/trace.zip"
+                echo ""
+            fi
+        fi
+        
+        # Show orchestrate-agents logs
         orchestrate-agents logs "$task_id" false 2>/dev/null || {
-            echo -e "${YELLOW}No logs found. Agent may not be running.${NC}"
+            echo -e "${YELLOW}No agent logs found. Agent may not be running.${NC}"
             echo "Check status with: auto-cursor status $project_id"
         }
     fi
@@ -650,6 +872,155 @@ retry_single_task() {
     
     # Restart execution for this task
     echo -e "${GREEN}Task $task_id reset to pending. Run 'auto-cursor start $project_id' to retry.${NC}"
+}
+
+# Build website from business brief
+build_website() {
+    local target_path="$1"
+    local business_brief="$2"
+    local parallel="${3:-3}"  # Accept parallel value (default 3)
+    
+    # Validate target path (parent directory must exist)
+    local parent_dir=$(dirname "$target_path")
+    if [ ! -d "$parent_dir" ]; then
+        echo -e "${RED}Error: Parent directory does not exist: $parent_dir${NC}" >&2
+        exit 1
+    fi
+    
+    # Reject unsafe paths
+    if echo "$target_path" | grep -qE "(\.\.|/tmp|/var/tmp)"; then
+        echo -e "${YELLOW}Warning: Target path contains potentially unsafe elements${NC}" >&2
+    fi
+    
+    # Create target directory if it doesn't exist
+    if [ ! -d "$target_path" ]; then
+        mkdir -p "$target_path"
+        echo -e "${GREEN}Created target directory: $target_path${NC}"
+    fi
+    
+    # Generate spec from brief
+    local brief_to_spec="${BASH_SOURCE[0]%/*}/brief-to-spec"
+    if [ ! -f "$brief_to_spec" ]; then
+        echo -e "${RED}Error: brief-to-spec utility not found${NC}" >&2
+        exit 1
+    fi
+    
+    echo -e "${CYAN}════════════════════════════════════════${NC}"
+    echo -e "${CYAN}Auto-Cursor Website Builder${NC}"
+    echo -e "${CYAN}════════════════════════════════════════${NC}"
+    echo ""
+    echo -e "${BLUE}Business Brief:${NC}"
+    echo "  $business_brief"
+    echo ""
+    
+    echo -e "${BLUE}Generating website specification...${NC}"
+    local spec_json=$("$brief_to_spec" "$business_brief")
+    
+    if [ -z "$spec_json" ] || ! echo "$spec_json" | jq '.' >/dev/null 2>&1; then
+        echo -e "${RED}Error: Failed to generate spec from brief${NC}" >&2
+        exit 1
+    fi
+    
+    # Extract spec details
+    local business_name=$(echo "$spec_json" | jq -r '.business_name')
+    local business_type=$(echo "$spec_json" | jq -r '.business_type')
+    local pages=$(echo "$spec_json" | jq -r '.pages | join(", ")')
+    local cta=$(echo "$spec_json" | jq -r '.cta')
+    local location=$(echo "$spec_json" | jq -r '.location // ""')
+    
+    # Print spec
+    echo -e "${GREEN}✓ Specification generated${NC}"
+    echo ""
+    echo -e "${CYAN}Website Specification:${NC}"
+    echo "  Business: $business_name${location:+ ($location)}"
+    echo "  Type: $business_type"
+    echo "  Pages: $pages"
+    echo "  Primary CTA: $cta"
+    echo "  Contact Form: Required (local API route)"
+    echo "  Features: Responsive, Accessibility, SEO, Playwright Tests"
+    echo ""
+    echo -e "${BLUE}Starting website build...${NC}"
+    echo ""
+    
+    # Convert spec to goal string for planner
+    local goal="Build a marketing website for $business_name"
+    if [ -n "$location" ]; then
+        goal="$goal in $location"
+    fi
+    goal="$goal. "
+    goal="${goal}Pages: $pages. "
+    goal="${goal}Requirements: responsive navigation and footer, clean modern layout. "
+    goal="${goal}Contact page must submit to a local API endpoint and show a success message. "
+    goal="${goal}Add Playwright tests that verify navigation, form submit success, and Home CTA visibility. "
+    goal="${goal}Primary CTA: \"$cta\". "
+    goal="${goal}Post-merge QA must pass."
+    
+    # Generate project ID from target path
+    local project_id=$(basename "$target_path" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g')
+    if [ -z "$project_id" ] || [ "$project_id" = "-" ]; then
+        project_id="website-$(date +%s)"
+    fi
+    
+    # Call golden-path run (use run-golden-path script)
+    local run_script="${BASH_SOURCE[0]%/*}/run-golden-path"
+    if [ ! -f "$run_script" ]; then
+        echo -e "${RED}Error: run-golden-path utility not found${NC}" >&2
+        exit 1
+    fi
+    
+    # Check for --parallel flag (forward to run-golden-path)
+    local parallel_val="3"
+    # website command doesn't take --parallel directly, but we can extract from environment or use default
+    # For now, use default 3 (can be enhanced later)
+    
+    # Run golden path (capture exit code)
+    local run_exit=0
+    "$run_script" "$target_path" "$goal" "$project_id" "$parallel" || run_exit=$?
+    
+    # Print deliverables summary (regardless of success/failure)
+    echo ""
+    echo -e "${CYAN}════════════════════════════════════════${NC}"
+    if [ $run_exit -eq 0 ]; then
+        echo -e "${CYAN}Website Build Complete${NC}"
+    else
+        echo -e "${CYAN}Website Build Summary${NC}"
+    fi
+    echo -e "${CYAN}════════════════════════════════════════${NC}"
+    echo ""
+    echo -e "${GREEN}Deliverables:${NC}"
+    echo "  Target Directory: $target_path"
+    echo "  Project ID: $project_id"
+    echo ""
+    echo -e "${CYAN}Pages Created:${NC}"
+    echo "$spec_json" | jq -r '.pages[]' | while read -r page; do
+        echo "  - $page"
+    done
+    echo ""
+    echo -e "${CYAN}How to Run:${NC}"
+    echo "  1. Development server:"
+    echo "     cd $target_path"
+    echo "     npm run dev"
+    echo ""
+    echo "  2. Run Playwright tests:"
+    echo "     cd $target_path"
+    echo "     npx playwright test"
+    echo ""
+    echo "  3. Build for production:"
+    echo "     cd $target_path"
+    echo "     npm run build"
+    echo ""
+    echo -e "${CYAN}Artifacts Location:${NC}"
+    echo "  If Playwright tests fail, artifacts are stored at:"
+    echo "  ~/.auto-cursor/projects/$project_id/artifacts/<task-id>/<attempt-N>-<timestamp>/"
+    echo ""
+    
+    if [ $run_exit -eq 0 ]; then
+        echo -e "${GREEN}✓ Website ready for deployment${NC}"
+    else
+        echo -e "${YELLOW}⚠ Build completed with issues. Check logs for details.${NC}"
+    fi
+    
+    return $run_exit
 }
 
 # Show diff before merge
@@ -779,8 +1150,9 @@ discard_single_worktree() {
     echo -e "${GREEN}Discarded $task_id${NC}"
 }
 
-# Continue interrupted execution
-continue_execution() {
+# Cleanup terminal-state worktrees for a project
+# Safety: Never delete non-terminal worktrees. Never kill processes.
+cleanup_terminal_worktrees() {
     local project_id="$1"
     local project_dir="${PROJECTS_DIR}/${project_id}"
     
@@ -790,30 +1162,213 @@ continue_execution() {
     fi
     
     local tasks_file="${project_dir}/tasks.json"
-    local orchestration_file="${project_dir}/orchestration.json"
+    if [ ! -f "$tasks_file" ]; then
+        echo -e "${YELLOW}No tasks found for project: $project_id${NC}"
+        exit 0
+    fi
     
-    if [ ! -f "$orchestration_file" ]; then
-        echo -e "${RED}Error: No orchestration file found. Run 'auto-cursor start $project_id' first.${NC}" >&2
+    # Find terminal-state tasks (completed or failed)
+    local terminal_tasks=$(jq -r '.[] | select(.status == "completed" or .status == "failed") | .id' "$tasks_file" 2>/dev/null || echo "")
+    
+    if [ -z "$terminal_tasks" ]; then
+        echo -e "${YELLOW}No terminal-state tasks found for project: $project_id${NC}"
+        exit 0
+    fi
+    
+    # Collect worktrees to clean
+    local worktrees_to_clean=""
+    local project_path=$(jq -r '.path' "${project_dir}/config.json" 2>/dev/null || echo "")
+    
+    echo -e "${BLUE}Terminal-state worktrees for project: $project_id${NC}"
+    echo ""
+    
+    for task_id in $terminal_tasks; do
+        local worktree_name="auto-cursor-${project_id}-${task_id}"
+        local worktree_path="${WORKTREES_DIR}/${worktree_name}"
+        
+        if [ -d "$worktree_path" ]; then
+            local task_status=$(jq -r ".[] | select(.id == \"$task_id\") | .status" "$tasks_file" 2>/dev/null || echo "unknown")
+            echo -e "  ${CYAN}•${NC} $task_id (status: $task_status)"
+            echo -e "    ${YELLOW}→${NC} $worktree_path"
+            worktrees_to_clean="${worktrees_to_clean}${task_id} "
+        fi
+    done
+    
+    if [ -z "$worktrees_to_clean" ]; then
+        echo -e "${YELLOW}No worktrees found for terminal-state tasks${NC}"
+        exit 0
+    fi
+    
+    echo ""
+    echo -e "${YELLOW}This will remove the worktrees listed above.${NC}"
+    echo -e "${YELLOW}Continue? (yes/no): ${NC}"
+    read -r confirmation
+    
+    if [ "$confirmation" != "yes" ]; then
+        echo -e "${YELLOW}Cancelled${NC}"
+        exit 0
+    fi
+    
+    # Clean up worktrees
+    echo ""
+    echo -e "${BLUE}Cleaning up worktrees...${NC}"
+    
+    for task_id in $worktrees_to_clean; do
+        discard_single_worktree "$project_id" "$task_id" "$project_path"
+    done
+    
+    echo ""
+    echo -e "${GREEN}Cleanup complete${NC}"
+}
+
+# Continue interrupted execution
+# Cleanup stale PIDs and locks for a project
+cleanup_stale_resources() {
+    local project_id="$1"
+    local project_dir="${PROJECTS_DIR}/${project_id}"
+    
+    echo -e "${BLUE}Cleaning up stale resources for $project_id...${NC}"
+    
+    # Get all task IDs from tasks.json
+    local tasks_file="${project_dir}/tasks.json"
+    if [ ! -f "$tasks_file" ]; then
+        return 0
+    fi
+    
+    local task_ids=$(jq -r '.[].id' "$tasks_file" 2>/dev/null || echo "")
+    
+    for task_id in $task_ids; do
+        # Check server PIDs
+        local pid_file="${HOME}/.auto-cursor/server-state/${task_id}.pid"
+        if [ -f "$pid_file" ]; then
+            local pid=$(cat "$pid_file" 2>/dev/null || echo "")
+            if [ -n "$pid" ] && [ "$pid" != "0" ]; then
+                if ! kill -0 "$pid" 2>/dev/null; then
+                    echo "  Removing stale server PID: $pid (task: $task_id)"
+                    rm -f "$pid_file"
+                fi
+            fi
+        fi
+        
+        # Check agent PIDs
+        local agent_pid_file="/tmp/cursor-agents/pids/${task_id}.pid"
+        if [ -f "$agent_pid_file" ]; then
+            local pid=$(cat "$agent_pid_file" 2>/dev/null || echo "")
+            if [ -n "$pid" ] && [ "$pid" != "0" ]; then
+                if ! kill -0 "$pid" 2>/dev/null; then
+                    echo "  Removing stale agent PID: $pid (task: $task_id)"
+                    rm -f "$agent_pid_file"
+                fi
+            fi
+        fi
+        
+        # Check locks (stale if older than 1 hour)
+        local lock_file="/tmp/cursor-agents/pids/${task_id}.lock"
+        if [ -f "$lock_file" ]; then
+            local lock_age=$(($(date +%s) - $(stat -c %Y "$lock_file" 2>/dev/null || echo "0")))
+            if [ $lock_age -gt 3600 ]; then
+                echo "  Removing stale lock: $lock_file (age: ${lock_age}s)"
+                rm -f "$lock_file"
+            fi
+        fi
+    done
+    
+    echo -e "${GREEN}✓ Cleanup complete${NC}"
+}
+
+continue_execution() {
+    local project_id="$1"
+    local project_dir="${PROJECTS_DIR}/${project_id}"
+    
+    if [ ! -d "$project_dir" ]; then
+        echo -e "${RED}Error: Project not found: $project_id${NC}" >&2
         exit 1
     fi
     
-    echo -e "${CYAN}Continuing execution for $project_id...${NC}"
+    # Auto-migrate state
+    auto-cursor-migrate "$project_id" >/dev/null 2>&1 || true
     
-    # Check which tasks are still pending/running
-    local tasks=$(cat "$tasks_file")
-    local incomplete=$(echo "$tasks" | jq '[.[] | select(.status == "pending" or .status == "running" or .status == "waiting")]')
+    # Cleanup stale resources
+    cleanup_stale_resources "$project_id"
     
-    if [ "$(echo "$incomplete" | jq 'length')" -eq 0 ]; then
-        echo -e "${YELLOW}No incomplete tasks to continue${NC}"
+    local orchestration_file="${project_dir}/orchestration.json"
+    local tasks_file="${project_dir}/tasks.json"
+    
+    if [ ! -f "$orchestration_file" ]; then
+        echo -e "${YELLOW}No active orchestration found. Use 'auto-cursor start $project_id' to begin.${NC}"
         return
     fi
     
-    echo -e "${BLUE}Resuming $(echo "$incomplete" | jq 'length') incomplete tasks...${NC}"
-    
-    # Restart orchestration
-    orchestrate-agents start "$orchestration_file"
-    
+    echo -e "${CYAN}Continuing execution for $project_id...${NC}"
     echo ""
+    
+    # Verify worktrees exist (recreate if missing safely)
+    local project_path=$(jq -r '.path' "${project_dir}/config.json")
+    local tasks=$(cat "$tasks_file" 2>/dev/null || echo "[]")
+    
+    echo -e "${BLUE}Verifying worktrees...${NC}"
+    local task_count=$(echo "$tasks" | jq 'length' 2>/dev/null || echo "0")
+    for i in $(seq 0 $((task_count - 1))); do
+        local task_id=$(echo "$tasks" | jq -r ".[$i].id")
+        local worktree_name="auto-cursor-${project_id}-${task_id}"
+        local worktree_path="${WORKTREES_DIR}/${worktree_name}"
+        
+        if [ ! -d "$worktree_path" ]; then
+            echo "  Recreating worktree for $task_id..."
+            (
+                cd "$project_path"
+                git worktree add "$worktree_path" -b "auto-cursor/${task_id}" 2>/dev/null || {
+                    mkdir -p "$worktree_path"
+                    cp -r "$project_path"/* "$worktree_path"/ 2>/dev/null || true
+                }
+            )
+        fi
+    done
+    
+    # Check for RUNNING tasks and verify PIDs
+    echo -e "${BLUE}Checking task statuses...${NC}"
+    local updated_tasks=$(echo "$tasks" | jq -c '.[]' | while IFS= read -r task; do
+        local task_id=$(echo "$task" | jq -r '.id')
+        local status=$(echo "$task" | jq -r '.status')
+        
+        if [ "$status" = "running" ]; then
+            # Check if PID exists and process is alive
+            local pid_file="/tmp/cursor-agents/pids/${task_id}.pid"
+            if [ -f "$pid_file" ]; then
+                local pid=$(cat "$pid_file" 2>/dev/null || echo "")
+                if [ -n "$pid" ] && [ "$pid" != "0" ] && kill -0 "$pid" 2>/dev/null; then
+                    # Process is alive, keep as RUNNING
+                    echo "$task" | jq '.status = "running"'
+                else
+                    # PID missing/dead, mark as FAILED and requeue
+                    echo "  Task $task_id: PID dead, marking as failed and requeuing..."
+                    echo "$task" | jq '.status = "pending" | .retry_count = ((.retry_count // 0) + 1)'
+                fi
+            else
+                # No PID file, mark as pending
+                echo "  Task $task_id: No PID found, marking as pending..."
+                echo "$task" | jq '.status = "pending"'
+            fi
+        else
+            echo "$task"
+        fi
+    done | jq -s '.')
+    
+    echo "$updated_tasks" | jq '.' > "$tasks_file"
+    
+    # Resume scheduler
+    echo -e "${GREEN}Resuming execution...${NC}"
+    orchestrate-agents start "$orchestration_file" &
+    local start_pid=$!
+    
+    # Start monitor in background
+    (
+        nohup orchestrate-agents monitor "$orchestration_file" > "${project_dir}/monitor.log" 2>&1
+    ) &
+    local monitor_pid=$!
+    echo "$monitor_pid" > "${project_dir}/.monitor-pid"
+    
+    echo -e "${CYAN}Monitor started (PID: $monitor_pid)${NC}"
     echo -e "${CYAN}Use 'auto-cursor status $project_id' to monitor progress${NC}"
 }
 
@@ -1553,27 +2108,31 @@ case "${1:-help}" in
             usage
             exit 1
         fi
-        # Parse optional flags
+        # Check for blocked flags FIRST (before any other validation)
         _project_id="$2"
-        _max_iterations=""
-        _skip_qa="false"
+        _parallel="3"
         shift 2
+        
         while [ $# -gt 0 ]; do
             case "$1" in
-                --max-iterations)
-                    _max_iterations="$2"
+                --max-iterations|--skip-qa)
+                    check_blocked_flag "$1"
+                    # check_blocked_flag exits, but if it doesn't, continue
+                    shift
+                    ;;
+                --parallel)
+                    _parallel="$2"
                     shift 2
                     ;;
-                --skip-qa)
-                    _skip_qa="true"
-                    shift
-                    ;;
                 *)
-                    shift
+                    echo -e "${RED}Error: Unknown flag: $1${NC}" >&2
+                    usage
+                    exit 1
                     ;;
             esac
         done
-        start_execution "$_project_id" "$_max_iterations" "$_skip_qa"
+        
+        start_execution "$_project_id" "" "false" "$_parallel"
         ;;
     status)
         if [ -z "${2:-}" ]; then
@@ -1675,7 +2234,27 @@ case "${1:-help}" in
             usage
             exit 1
         fi
-        show_logs "$2" "${3:-}"
+        if [ "${3:-}" = "--tail" ]; then
+            tail-logs "$2" "${4:-all}"
+        else
+            show_logs "$2" "${3:-}"
+        fi
+        ;;
+    summary)
+        if [ -z "${2:-}" ]; then
+            echo -e "${RED}Error: Project ID required${NC}" >&2
+            usage
+            exit 1
+        fi
+        auto-cursor-summary "$2"
+        ;;
+    migrate)
+        if [ -z "${2:-}" ]; then
+            echo -e "${RED}Error: Project ID required${NC}" >&2
+            usage
+            exit 1
+        fi
+        auto-cursor-migrate "$2"
         ;;
     retry)
         if [ -z "${2:-}" ]; then
@@ -1748,6 +2327,86 @@ case "${1:-help}" in
             exit 1
         fi
         clean_project "$2"
+        ;;
+    cleanup)
+        if [ -z "${2:-}" ]; then
+            echo -e "${RED}Error: Project ID required${NC}" >&2
+            usage
+            exit 1
+        fi
+        cleanup_terminal_worktrees "$2"
+        ;;
+    run)
+        if [ -z "${2:-}" ] || [ -z "${3:-}" ]; then
+            echo -e "${RED}Error: Project path and goal required${NC}" >&2
+            echo "Usage: auto-cursor run <project-path> <goal> [project-id]"
+            exit 1
+        fi
+        # Check for context.json and extract parallel if specified
+        _context_file="${2}/.auto-cursor/context.json"
+        _context_parallel="3"
+        if [ -f "$_context_file" ] && jq '.' "$_context_file" >/dev/null 2>&1; then
+            _context_parallel=$(jq -r '.parallel // 3' "$_context_file" 2>/dev/null || echo "3")
+        fi
+        run-golden-path "$2" "$3" "${4:-}" "$_context_parallel"
+        ;;
+    website)
+        if [ -z "${2:-}" ] || [ -z "${3:-}" ]; then
+            echo -e "${RED}Error: Target path and business brief required${NC}" >&2
+            echo "Usage: auto-cursor website <target-path> \"<business brief>\" [--parallel N]"
+            exit 1
+        fi
+        _target_path="$2"
+        _business_brief="$3"
+        _parallel_val="3"
+        shift 3  # Remove website, target_path, brief
+        # Parse --parallel if provided
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                --parallel)
+                    _parallel_val="$2"
+                    shift 2
+                    ;;
+                *)
+                    shift
+                    ;;
+            esac
+        done
+        build_website "$_target_path" "$_business_brief" "$_parallel_val"
+        ;;
+    contracts)
+        if [ -z "${2:-}" ]; then
+            echo -e "${RED}Error: Project ID required${NC}" >&2
+            usage
+            exit 1
+        fi
+        contract-enforcer "$2"
+        ;;
+    trace-summary)
+        if [ -z "${2:-}" ]; then
+            echo -e "${RED}Error: Project ID required${NC}" >&2
+            usage
+            exit 1
+        fi
+        trace-summary "$2"
+        ;;
+    progress)
+        if [ -z "${2:-}" ]; then
+            echo -e "${RED}Error: Project ID required${NC}" >&2
+            usage
+            exit 1
+        fi
+        auto-cursor-progress "$2"
+        ;;
+    upgrade-check)
+        upgrade-check
+        ;;
+    doctor)
+        auto-cursor-doctor
+        ;;
+    version|--version|-v)
+        echo "auto-cursor version $VERSION"
+        exit 0
         ;;
     help|--help|-h)
         usage
