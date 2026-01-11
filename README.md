@@ -326,10 +326,48 @@ The system automatically resolves conflicts using AI. If manual resolution is ne
 ### Worktrees Not Cleaning Up
 
 ```bash
-# Manual cleanup
+# Clean up terminal-state worktrees (completed/failed tasks)
+auto-cursor cleanup <project-id>
+```
+
+**Syntax**: `auto-cursor cleanup <project-id>`
+
+**What it cleans**:
+- Only worktrees for tasks with status `completed` or `failed` (terminal states)
+- Requires explicit `yes` confirmation before deletion
+- Never touches active/running/pending tasks
+- Never kills processes
+
+**What it never cleans**:
+- Worktrees for `pending`, `running`, `qa_running`, `fix_running` tasks
+- Active agent processes
+- Non-terminal task worktrees
+
+**Example output**:
+```
+Terminal-state worktrees for project: my-project
+
+  • task-a (status: completed)
+    → ~/.auto-cursor/worktrees/auto-cursor-my-project-task-a
+  • task-b (status: failed)
+    → ~/.auto-cursor/worktrees/auto-cursor-my-project-task-b
+
+This will remove the worktrees listed above.
+Continue? (yes/no): yes
+
+Cleaning up worktrees...
+Discarded task-a
+Discarded task-b
+
+Cleanup complete
+```
+
+**Alternative commands**:
+```bash
+# Clean all worktrees (regardless of state)
 auto-cursor clean <project-id>
 
-# Or remove manually
+# Manual removal
 rm -rf ~/.auto-cursor/worktrees/auto-cursor-<project-id>-*
 ```
 
